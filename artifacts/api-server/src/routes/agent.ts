@@ -7,12 +7,73 @@ import {
   whatsappMessagesTable,
   relationsTable,
 } from "@workspace/db";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and, like, or, ne } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 
 const router = Router();
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
+
+// Mots vides français à ignorer pour la recherche
+const FR_STOP = new Set([
+  "dans","pour","avec","cette","comment","quels","quand","parce","mais","plus",
+  "tout","bien","faire","avoir","être","elle","lui","nous","vous","ils","elles",
+  "aussi","très","alors","donc","comme","encore","même","déjà","cela","celui",
+  "dont","leur","quel","quelle","quoi","rien","toujours","jamais","souvent",
+  "depuis","avant","après","entre","sous","vers","sans","selon","lors","jusqu",
+  "plus","moins","trop","assez","peu","beaucoup","lors","plusieurs","certains",
+]);
+
+/**
+ * Cherche dans les 48 000 messages les extraits les plus pertinents
+ * en fonction des mots-clés extraits de la question de l'utilisateur.
+ * Retourne jusqu'à `limit` messages triés chronologiquement.
+ */
+async function searchRelevantMessages(
+  relationId: number,
+  query: string,
+  limit = 50,
+  excludeIds: Set<number> = new Set()
+): Promise<Array<{ id: number; sentAt: Date; isMe: boolean; content: string; sender: string }>> {
+  const words = query
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // strip accents for search
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 3 && !FR_STOP.has(w));
+
+  if (!words.length) return [];
+
+  // Build OR conditions for each keyword (max 6 keywords)
+  const keywords = [...new Set(words)].slice(0, 6);
+  const conditions = keywords.map(w =>
+    like(whatsappMessagesTable.content, `%${w}%`)
+  );
+
+  const rows = await db
+    .select()
+    .from(whatsappMessagesTable)
+    .where(and(
+      eq(whatsappMessagesTable.relationId, relationId),
+      or(...conditions)
+    ))
+    .orderBy(desc(whatsappMessagesTable.sentAt))
+    .limit(limit * 3); // over-fetch then deduplicate
+
+  // Deduplicate with recentMessages, then sort chronologically, cap at limit
+  const unique = rows
+    .filter(m => !excludeIds.has(m.id))
+    .slice(0, limit)
+    .sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime());
+
+  return unique.map(m => ({
+    id: m.id,
+    sentAt: m.sentAt,
+    isMe: m.isMe,
+    content: m.content,
+    sender: m.sender,
+  }));
+}
 
 type Relation = { participantMe: string; participantOther: string };
 type Memory = {
@@ -48,7 +109,7 @@ async function buildContext(relationId: number) {
     .from(whatsappMessagesTable)
     .where(eq(whatsappMessagesTable.relationId, relationId))
     .orderBy(desc(whatsappMessagesTable.sentAt))
-    .limit(80);
+    .limit(150);
 
   recentMessages.reverse();
 
@@ -60,7 +121,11 @@ function buildSystemPrompt(
   mem: Memory | undefined,
   totalMessages: number,
   recentMessages: Array<{ sentAt: Date; isMe: boolean; content: string }>,
-  options: { selectedContext?: string; pastedConversation?: string } = {}
+  options: {
+    selectedContext?: string;
+    pastedConversation?: string;
+    relevantMessages?: Array<{ sentAt: Date; isMe: boolean; content: string }>;
+  } = {}
 ): { systemPrompt: string; contextUsed: string[] } {
   const contextUsed: string[] = [];
   const me = relation.participantMe;
@@ -172,6 +237,16 @@ PRINCIPES FONDAMENTAUX:
     contextUsed.push("messages conversation");
   } else if (!mem) {
     systemPrompt += `\n\n[Aucun message importé pour l'instant. Invite ${me} à importer la conversation ou à coller du texte directement.]`;
+  }
+
+  if (options.relevantMessages && options.relevantMessages.length > 0) {
+    const me = relation.participantMe;
+    const other = relation.participantOther;
+    const transcript = options.relevantMessages
+      .map(m => `[${m.sentAt.toISOString().split("T")[0]}] ${m.isMe ? me : other}: ${m.content}`)
+      .join("\n");
+    systemPrompt += `\n\n━━━ MESSAGES PERTINENTS TROUVÉS DANS L'HISTORIQUE COMPLET ━━━\n(Extraits de l'ensemble des ${totalMessages} messages — sélectionnés automatiquement en rapport avec la question)\n${transcript}`;
+    contextUsed.push(`recherche historique (${options.relevantMessages.length} msgs)`);
   }
 
   if (options.selectedContext) {
@@ -356,9 +431,15 @@ router.post("/relations/:relationId/agent/sessions/:sessionId/chat", async (req,
       }
     }
 
+    // Recherche contextuelle dans l'historique complet
+    const recentIds = new Set(recentMessages.map((m: { id: number }) => m.id));
+    const relevantMessages = message && message.length > 5
+      ? await searchRelevantMessages(relationId, message, 50, recentIds)
+      : [];
+
     const { systemPrompt, contextUsed } = buildSystemPrompt(
       relation, mem, totalMessages, recentMessages,
-      { selectedContext, pastedConversation }
+      { selectedContext, pastedConversation, relevantMessages }
     );
 
     // Previous session messages for context
