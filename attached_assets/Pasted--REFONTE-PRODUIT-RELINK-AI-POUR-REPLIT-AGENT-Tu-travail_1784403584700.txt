@@ -1,0 +1,776 @@
+# REFONTE PRODUIT RELINK AI POUR REPLIT AGENT
+
+Tu travailles sur mon projet existant ReLink AI.
+
+Le projet est déjà développé en grande partie.
+
+Ne recommence pas tout depuis zéro.
+
+Commence par analyser le dépôt existant, les pages, les composants, les modèles Prisma, les fonctionnalités d’import WhatsApp, les analyses IA, les règles de sécurité et les tests.
+
+L’objectif de cette mission est de transformer l’expérience actuelle en un véritable assistant relationnel aussi simple à utiliser que ChatGPT.
+
+# VISION PRODUIT
+
+ReLink AI devient :
+
+**Un copilote IA spécialisé dans les ruptures, les relations compliquées et les conversations.**
+
+L’utilisateur importe une conversation WhatsApp.
+
+ReLink AI construit une mémoire de la relation.
+
+Ensuite, l’utilisateur peut parler naturellement avec l’agent comme avec ChatGPT.
+
+Il ne doit pas naviguer dans de nombreux menus techniques.
+
+Il doit simplement pouvoir demander :
+
+* Analyse son dernier message.
+* Pourquoi répond-elle comme cela ?
+* Compare cette semaine avec le mois dernier.
+* Résume toute notre histoire.
+* Analyse cette capture d’écran.
+* Est-ce préférable de répondre maintenant ?
+* Propose-moi une réponse courte et naturelle.
+* Rends cette réponse plus ferme.
+* Montre-moi les messages sur lesquels tu te bases.
+
+Le produit doit donner la sensation que l’agent connaît toute la relation et s’en souvient.
+
+# OBJECTIF DE CETTE MISSION
+
+Refondre l’interface et le parcours utilisateur sans casser les fonctions existantes.
+
+À la fin, l’application doit être centrée autour de trois expériences principales :
+
+1. Importer et construire la mémoire relationnelle.
+2. Lire la conversation dans une interface proche de WhatsApp.
+3. Parler avec l’agent ReLink AI dans une interface proche de ChatGPT.
+
+# PRIORITÉ ABSOLUE
+
+L’application doit être immédiatement compréhensible.
+
+Un nouvel utilisateur doit comprendre le produit en moins de 30 secondes.
+
+Il ne doit pas voir en premier :
+
+* des tableaux complexes ;
+* des termes techniques ;
+* des pages de configuration ;
+* des analyses séparées difficiles à trouver ;
+* des menus trop nombreux.
+
+Il doit voir en premier un assistant conversationnel.
+
+# ÉCRAN PRINCIPAL
+
+Créer une page principale moderne centrée sur le chat.
+
+Structure desktop recommandée :
+
+* colonne gauche : conversation WhatsApp ;
+* colonne droite : agent ReLink AI.
+
+La colonne gauche contient :
+
+* les messages ;
+* les dates ;
+* les séparateurs par journée ;
+* les participants ;
+* la recherche ;
+* la navigation chronologique ;
+* la sélection d’un message ;
+* la sélection d’une journée ;
+* la sélection d’une période.
+
+La colonne droite contient :
+
+* l’historique des échanges avec l’agent ;
+* une zone de saisie ;
+* les pièces jointes ;
+* les suggestions rapides ;
+* les analyses ;
+* les réponses proposées ;
+* les boutons de copie.
+
+Sur mobile :
+
+* onglet Conversation ;
+* onglet Agent IA ;
+* bouton flottant Demander à ReLink ;
+* possibilité de basculer rapidement entre le message sélectionné et l’analyse.
+
+# PAGE D’ACCUEIL APRÈS CONNEXION
+
+Afficher une interface simple.
+
+Exemple :
+
+Bonjour.
+
+Que souhaitez-vous analyser aujourd’hui ?
+
+Ajouter des actions rapides :
+
+* Importer une conversation WhatsApp
+* Ajouter une capture d’écran
+* Coller un nouveau message
+* Ouvrir ma dernière conversation
+* Demander à ReLink
+
+Si une relation existe déjà, afficher directement :
+
+* le dernier message ;
+* la dernière analyse ;
+* la phase actuelle estimée ;
+* un bouton Continuer avec ReLink.
+
+# IMPORT WHATSAPP
+
+L’import WhatsApp sert à créer la mémoire relationnelle.
+
+Ne pas présenter l’import comme la finalité du produit.
+
+Après sélection du fichier, afficher une progression claire :
+
+* lecture du fichier ;
+* détection des messages ;
+* chiffrement ;
+* enregistrement ;
+* construction des résumés ;
+* création de la mémoire relationnelle.
+
+Afficher :
+
+* nombre de messages ;
+* nombre de journées ;
+* progression ;
+* étape actuelle ;
+* temps écoulé ;
+* estimation restante.
+
+Après l’import, afficher :
+
+Votre mémoire relationnelle est prête.
+
+Puis proposer :
+
+* Parler à ReLink
+* Ouvrir la conversation
+* Voir le résumé de la relation
+
+# MÉMOIRE RELATIONNELLE
+
+L’agent doit exploiter les données déjà existantes dans le projet.
+
+La mémoire doit être construite avec plusieurs niveaux :
+
+* messages récents ;
+* résumés par journée ;
+* résumés par période ;
+* grandes phases ;
+* sujets récurrents ;
+* limites exprimées ;
+* événements importants ;
+* questions ouvertes ;
+* tendances de communication ;
+* mémoire globale.
+
+Ne jamais renvoyer toute la conversation de dizaines de milliers de messages dans chaque appel IA.
+
+Réutiliser les résumés et les analyses existantes.
+
+Pour chaque nouvelle question, sélectionner automatiquement le contexte utile.
+
+# AGENT RELINK AI
+
+Le chatbot est le cœur du produit.
+
+L’utilisateur doit pouvoir poser des questions librement.
+
+Le système doit automatiquement déterminer s’il doit utiliser :
+
+* le dernier message ;
+* le contexte proche ;
+* la journée ;
+* la semaine ;
+* une période ;
+* la mémoire globale ;
+* les limites explicites ;
+* les sujets récurrents ;
+* les analyses précédentes.
+
+L’utilisateur ne doit pas avoir besoin de choisir manuellement le type d’analyse.
+
+Afficher éventuellement une indication discrète :
+
+Contexte utilisé :
+
+* derniers messages ;
+* résumé de la semaine ;
+* mémoire globale.
+
+# EXEMPLES DE QUESTIONS RAPIDES
+
+Sous le champ de saisie, afficher des suggestions contextuelles :
+
+* Analyse le dernier message
+* Dois-je répondre maintenant ?
+* Propose une réponse
+* Analyse cette journée
+* Compare avec le mois dernier
+* Quels schémas se répètent ?
+* Résume la situation actuelle
+* Montre-moi les messages sources
+
+Les suggestions doivent changer selon le contexte.
+
+# ANALYSE D’UN MESSAGE
+
+Lorsqu’un message est sélectionné dans la conversation, afficher une action :
+
+Analyser avec ReLink
+
+L’agent doit répondre avec une structure claire :
+
+## Ce que le message dit clairement
+
+## Ce que le contexte récent montre
+
+## Ce que l’historique ajoute
+
+## Interprétations possibles
+
+## Ce qu’on ne peut pas savoir
+
+## Risques d’une réponse impulsive
+
+## Options possibles
+
+## Réponses proposées
+
+Ne jamais présenter une interprétation comme un fait.
+
+# RÉPONSES PROPOSÉES
+
+Proposer au maximum trois réponses.
+
+Exemples de styles :
+
+* courte et naturelle ;
+* calme et ouverte ;
+* ferme avec une limite claire.
+
+Chaque proposition doit contenir :
+
+* le texte ;
+* l’intention ;
+* le ton ;
+* une explication courte ;
+* un bouton Copier ;
+* un bouton Modifier.
+
+Ajouter des transformations rapides :
+
+* Plus courte
+* Plus naturelle
+* Plus douce
+* Plus ferme
+* Sans reproche
+* Une seule question
+* Version détachée
+* Version digne
+
+Ne jamais envoyer automatiquement le message.
+
+Après copie, afficher :
+
+Réponse copiée. Relisez-la avant de l’envoyer.
+
+# NOUVEAU MESSAGE
+
+Créer un bouton principal :
+
+Ajouter un nouveau message
+
+Options :
+
+* coller le texte ;
+* importer une capture d’écran ;
+* ajouter manuellement ;
+* futur connecteur officiel.
+
+L’utilisateur choisit :
+
+* la relation ;
+* le participant ;
+* la date ;
+* l’heure.
+
+Puis l’application analyse immédiatement le message en utilisant :
+
+* les derniers échanges ;
+* la journée actuelle ;
+* la période récente ;
+* la mémoire globale.
+
+Afficher une première réponse rapide avant les analyses plus longues.
+
+# CAPTURE D’ÉCRAN
+
+Permettre à l’utilisateur de déposer une capture d’écran.
+
+Créer un parcours simple :
+
+1. Ajouter la capture.
+2. Extraire les messages.
+3. Afficher le texte détecté.
+4. Permettre une correction.
+5. Identifier les participants.
+6. Analyser.
+7. Proposer une réponse.
+8. Ajouter les messages à la chronologie après confirmation.
+
+Ne jamais ajouter automatiquement des messages OCR sans validation utilisateur.
+
+# APERÇU WHATSAPP
+
+Créer une interface inspirée de WhatsApp sans copier de marque protégée de manière trompeuse.
+
+Utiliser :
+
+* bulles de messages ;
+* messages entrants à gauche ;
+* messages sortants à droite ;
+* dates visibles ;
+* séparateurs de journée ;
+* sélection ;
+* recherche ;
+* navigation ;
+* chargement progressif.
+
+Ne jamais charger 46 000 messages en une seule fois dans le navigateur.
+
+Utiliser une pagination par curseur ou un chargement infini.
+
+# SÉLECTION
+
+Permettre de sélectionner :
+
+* un message ;
+* plusieurs messages ;
+* une journée ;
+* une période ;
+* toute la conversation.
+
+Lorsque plusieurs messages sont sélectionnés, afficher :
+
+12 messages sélectionnés
+
+Actions :
+
+* Analyser
+* Résumer
+* Proposer une réponse au dernier message
+* Ajouter au contexte du chat
+
+# MÉMOIRE DE L’AGENT
+
+Le chat entre l’utilisateur et ReLink doit rester disponible.
+
+L’utilisateur doit pouvoir continuer naturellement :
+
+Utilisateur :
+
+Analyse le dernier message.
+
+Agent :
+
+Analyse.
+
+Utilisateur :
+
+Fais une version plus courte.
+
+Agent :
+
+Nouvelle version.
+
+Utilisateur :
+
+Plus naturelle.
+
+Agent :
+
+Nouvelle version.
+
+Utilisateur :
+
+Compare maintenant avec le mois dernier.
+
+Agent :
+
+Nouvelle analyse.
+
+Le système doit comprendre les références conversationnelles comme :
+
+* elle ;
+* lui ;
+* ce message ;
+* cette journée ;
+* cette période ;
+* la dispute ;
+* les vacances ;
+* le dernier silence.
+
+# POSITIONNEMENT RELATIONNEL
+
+Le produit est conçu pour aider une personne qui souffre après une rupture ou une relation difficile.
+
+Il peut l’aider à :
+
+* comprendre la dynamique ;
+* éviter les réactions impulsives ;
+* retrouver sa dignité ;
+* prendre du recul ;
+* mieux communiquer ;
+* identifier les erreurs répétées ;
+* décider de répondre ou non ;
+* reconstruire une relation lorsque c’est possible et souhaité.
+
+Il ne doit jamais promettre :
+
+* le retour certain d’un ex ;
+* le contrôle d’une autre personne ;
+* une position dominante ;
+* un résultat émotionnel garanti.
+
+Dans l’interface, utiliser des formulations comme :
+
+* retrouver une position plus stable ;
+* reprendre le contrôle de ses réactions ;
+* sortir de la dépendance émotionnelle ;
+* restaurer un échange plus équilibré ;
+* communiquer avec dignité ;
+* éviter les comportements de poursuite.
+
+# RAPPORT DE DYNAMIQUE
+
+Créer un résumé utile, pas un tableau clinique.
+
+Afficher notamment :
+
+* qui initie les échanges ;
+* qui relance ;
+* temps de réponse ;
+* fréquence des messages ;
+* changements récents ;
+* sujets répétitifs ;
+* conflits ;
+* silences ;
+* reprises ;
+* limites exprimées ;
+* questions sans réponse.
+
+Toujours distinguer :
+
+* faits observables ;
+* tendances ;
+* hypothèses ;
+* éléments impossibles à déterminer.
+
+# DESIGN
+
+Créer une interface haut de gamme, sobre et rassurante.
+
+Style recherché :
+
+* moderne ;
+* chaleureux ;
+* discret ;
+* émotionnel sans être enfantin ;
+* professionnel ;
+* mobile-first ;
+* lisible ;
+* peu de menus ;
+* grands espaces ;
+* boutons évidents ;
+* animations légères.
+
+Éviter :
+
+* les tableaux administratifs ;
+* les couleurs agressives ;
+* les écrans surchargés ;
+* les termes techniques ;
+* les cartes trop nombreuses ;
+* les statistiques sans utilité.
+
+Le chatbot doit être visuellement dominant.
+
+# NAVIGATION
+
+Simplifier la navigation principale.
+
+Proposition :
+
+* ReLink
+* Conversation
+* Mémoire
+* Paramètres
+
+Éviter plus de quatre entrées principales.
+
+Les pages techniques ou secondaires peuvent être placées dans Paramètres.
+
+# DONNÉES ET SÉCURITÉ
+
+Ne casse pas les mécanismes existants :
+
+* authentification ;
+* consentement ;
+* chiffrement ;
+* pseudonymisation ;
+* isolation des utilisateurs ;
+* suppression ;
+* journalisation minimale ;
+* limitations ;
+* garde-fous.
+
+Ne mets jamais les messages complets dans les logs.
+
+Ne stocke pas les contenus sensibles en clair.
+
+Ne révèle jamais les secrets serveur dans le client.
+
+# INTÉGRATIONS WHATSAPP
+
+Pour le MVP, prendre en charge :
+
+* import de fichier exporté ;
+* copier-coller ;
+* capture d’écran ;
+* ajout manuel.
+
+Préparer une abstraction pour de futures sources.
+
+Ne prétends pas connecter les conversations personnelles WhatsApp en temps réel sans méthode officielle disponible et autorisée.
+
+Prévoir des adaptateurs futurs désactivés :
+
+* partage mobile ;
+* extension autorisée ;
+* WhatsApp Business Cloud API lorsqu’elle est adaptée ;
+* connecteur officiel futur.
+
+# MÉTHODE DE TRAVAIL REPLIT
+
+Travaille par étapes visibles.
+
+Étape 1 :
+
+Auditer le projet existant.
+
+Présenter brièvement :
+
+* les pages existantes ;
+* les fonctions réutilisables ;
+* les pages à fusionner ;
+* les pages à conserver ;
+* les risques techniques.
+
+Étape 2 :
+
+Créer le nouveau shell d’application et la navigation simplifiée.
+
+Étape 3 :
+
+Créer l’écran principal ReLink avec le chatbot.
+
+Étape 4 :
+
+Intégrer l’aperçu de conversation.
+
+Étape 5 :
+
+Connecter les fonctions d’analyse existantes.
+
+Étape 6 :
+
+Ajouter le nouveau message et la capture d’écran.
+
+Étape 7 :
+
+Améliorer la mémoire relationnelle.
+
+Étape 8 :
+
+Tester le parcours complet.
+
+Ne crée pas uniquement des maquettes statiques.
+
+Chaque bouton principal doit être fonctionnel.
+
+# PARCOURS UTILISATEUR À TESTER
+
+## Parcours 1 — nouvel utilisateur
+
+1. Créer un compte.
+2. Donner les consentements.
+3. Importer un export WhatsApp.
+4. Suivre la progression.
+5. Confirmer les participants.
+6. Construire la mémoire.
+7. Arriver sur l’agent.
+8. Poser une question.
+9. Obtenir une réponse contextualisée.
+
+## Parcours 2 — message sélectionné
+
+1. Ouvrir une conversation.
+2. Sélectionner un message.
+3. Cliquer sur Analyser avec ReLink.
+4. Obtenir l’analyse.
+5. Générer une réponse.
+6. Copier la réponse.
+
+## Parcours 3 — nouveau message
+
+1. Coller un nouveau message.
+2. Choisir le participant.
+3. Lancer l’analyse.
+4. Utiliser la mémoire existante.
+5. Proposer trois réponses.
+6. Modifier.
+7. Copier.
+
+## Parcours 4 — capture
+
+1. Importer une capture.
+2. Lire le texte.
+3. Corriger le texte.
+4. Confirmer les participants.
+5. Analyser.
+6. Proposer une réponse.
+7. Ajouter à la conversation.
+
+## Parcours 5 — question globale
+
+1. Demander : Résume toute notre histoire.
+2. Utiliser la mémoire hiérarchique.
+3. Afficher les grandes phases.
+4. Afficher les limites.
+5. Afficher les messages sources.
+6. Ne pas envoyer toute la conversation brute dans un seul appel.
+
+# PERFORMANCE
+
+Optimiser l’impression de rapidité.
+
+Afficher immédiatement :
+
+* le message sélectionné ;
+* les faits locaux ;
+* les résultats mis en cache ;
+* l’état de chargement.
+
+Charger ensuite :
+
+* le contexte récent ;
+* la mémoire ;
+* l’analyse approfondie ;
+* les réponses.
+
+Objectifs :
+
+* aucune page blanche ;
+* aucune interface bloquée ;
+* aucun chargement de dizaines de milliers de messages côté client ;
+* pas de réanalyse complète à chaque question ;
+* utilisation du cache ;
+* mise à jour incrémentale.
+
+# TESTS
+
+Conserver les tests existants.
+
+Ajouter des tests pour :
+
+* navigation simplifiée ;
+* chat principal ;
+* sélection d’un message ;
+* analyse ;
+* copie ;
+* ajout manuel ;
+* capture ;
+* chargement progressif ;
+* mémoire ;
+* contexte sélectionné automatiquement ;
+* absence d’envoi automatique ;
+* isolation des utilisateurs ;
+* sécurité ;
+* erreurs utilisateur compréhensibles.
+
+Tester également le produit directement dans le navigateur.
+
+# ERREURS
+
+Remplacer les erreurs génériques.
+
+Afficher des messages clairs :
+
+* Impossible de lire ce fichier.
+* Aucun message détecté.
+* La capture doit être vérifiée.
+* La mémoire est encore en construction.
+* L’analyse est temporairement indisponible.
+* Le contexte est insuffisant.
+* Le consentement IA est requis.
+* Le message a déjà été ajouté.
+* La conversation est trop volumineuse pour être chargée entièrement.
+
+Le détail technique doit rester dans les logs serveur.
+
+# LIVRABLE ATTENDU
+
+À la fin, fournir :
+
+* un résumé des modifications ;
+* la liste des pages supprimées, conservées ou fusionnées ;
+* la liste des composants créés ;
+* la liste des migrations éventuelles ;
+* la liste des fonctions existantes réutilisées ;
+* les tests exécutés ;
+* les limites restantes ;
+* les prochaines priorités.
+
+Ne prétends pas qu’une fonction marche si elle n’a pas été testée.
+
+# CRITÈRES DE RÉUSSITE
+
+La mission est terminée uniquement si :
+
+* l’entrée principale est un chatbot ;
+* l’utilisateur peut importer une conversation ;
+* la progression est visible ;
+* la mémoire relationnelle est utilisée ;
+* la conversation est visible dans un aperçu moderne ;
+* un message peut être sélectionné ;
+* un nouveau message peut être collé ;
+* une capture peut être analysée après validation ;
+* l’agent répond en tenant compte de l’historique ;
+* les réponses peuvent être copiées rapidement ;
+* l’utilisateur peut continuer le dialogue naturellement ;
+* les menus ont été simplifiés ;
+* les données restent chiffrées ;
+* aucun envoi automatique n’existe ;
+* le parcours principal fonctionne dans le navigateur ;
+* l’application donne l’impression de parler avec un véritable copilote relationnel.
+
+Commence maintenant par auditer le dépôt existant.
+
+Ne supprime aucune fonction importante avant d’avoir identifié ce qui peut être réutilisé.
+
+Montre rapidement une première version fonctionnelle dans le navigateur, puis améliore-la progressivement.
