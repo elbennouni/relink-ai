@@ -11,7 +11,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="flex min-h-[100dvh] w-full flex-col bg-background text-foreground md:flex-row">
       <DesktopSidebar />
-      <main className="flex-1 w-full pb-16 md:pb-0 relative flex flex-col h-[100dvh] md:h-auto overflow-hidden md:overflow-visible">
+      <main className="flex-1 w-full pb-16 md:pb-0 relative flex flex-col h-[100dvh] overflow-hidden">
         {children}
       </main>
       <MobileNav />
