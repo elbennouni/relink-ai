@@ -18,22 +18,18 @@ function hashMessage(sender: string, content: string, sentAt: Date): string {
     .slice(0, 16);
 }
 
-/** Parse WhatsApp export text into messages */
-function parseWhatsappExport(text: string, participantMe?: string): {
+/** Parse WhatsApp timestamp format: [DD/MM/YYYY, HH:MM] - Sender: content */
+function parseWithTimestamps(text: string, participantMe?: string): {
   sender: string; content: string; sentAt: Date; isMe: boolean;
 }[] {
   const lines = text.split("\n");
   const results: { sender: string; content: string; sentAt: Date; isMe: boolean }[] = [];
-
-  // Support multiple date/time formats across locales
   const headerRe = /^[\[‎]?(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})[,\s]+(\d{1,2}):(\d{2})(?::?\d{2})?[\]‎]?\s*[-–]\s*([^:]+):\s*(.*)/;
-
   let current: { sender: string; content: string; sentAt: Date } | null = null;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) continue;
-
     const match = line.match(headerRe);
     if (match) {
       if (current) {
@@ -54,7 +50,6 @@ function parseWhatsappExport(text: string, participantMe?: string): {
       current.content += "\n" + line;
     }
   }
-
   if (current) {
     results.push({
       ...current,
@@ -63,8 +58,59 @@ function parseWhatsappExport(text: string, participantMe?: string): {
         : false,
     });
   }
-
   return results;
+}
+
+/**
+ * Fallback: simple "Sender: message" format without timestamps.
+ * Works with any app's copy-paste output (iMessage, Messenger, plain chat).
+ * Assigns synthetic timestamps 1 minute apart starting from today at 00:00.
+ */
+function parseSimpleFormat(text: string, participantMe?: string): {
+  sender: string; content: string; sentAt: Date; isMe: boolean;
+}[] {
+  // Match lines like "Paul: Hey salut" or "Moi: Ok" — sender max 60 chars, no digits that look like dates
+  const senderRe = /^([^\d\n:[\]]{1,60}?):\s+(.+)/;
+  const lines = text.split("\n");
+  const results: { sender: string; content: string; sentAt: Date; isMe: boolean }[] = [];
+  let current: { sender: string; content: string; sentAt: Date; isMe: boolean } | null = null;
+
+  const baseDate = new Date();
+  baseDate.setHours(0, 0, 0, 0);
+  let idx = 0;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(senderRe);
+    if (match) {
+      if (current) results.push(current);
+      const [, sender, content] = match;
+      const sentAt = new Date(baseDate.getTime() + idx * 60_000);
+      idx++;
+      current = {
+        sender: sender.trim(),
+        content: content.trim(),
+        sentAt,
+        isMe: participantMe
+          ? sender.trim().toLowerCase() === participantMe.toLowerCase()
+          : false,
+      };
+    } else if (current) {
+      current.content += "\n" + line;
+    }
+  }
+  if (current) results.push(current);
+  return results;
+}
+
+/** Parse WhatsApp export text into messages — tries timestamp format first, falls back to simple */
+function parseWhatsappExport(text: string, participantMe?: string): {
+  sender: string; content: string; sentAt: Date; isMe: boolean;
+}[] {
+  const withTs = parseWithTimestamps(text, participantMe);
+  if (withTs.length > 0) return withTs;
+  return parseSimpleFormat(text, participantMe);
 }
 
 /** Batch-insert parsed messages, skipping duplicates via hash check. */
