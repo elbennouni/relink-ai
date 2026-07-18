@@ -45,6 +45,8 @@ type WaMessage = {
   importSource?: string;
 };
 
+type MonthEntry = { year: number; month: number; count: number };
+
 // ─── SSE parser ──────────────────────────────────────────────────────────────
 
 function parseSSELine(line: string): {
@@ -104,6 +106,11 @@ export default function Workspace() {
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const waScrollRef = useRef<HTMLDivElement>(null);
 
+  // ── Month sidebar state ────────────────────────────────────────────────────
+  const [months, setMonths] = useState<MonthEntry[]>([]);
+  const [activeMonth, setActiveMonth] = useState<string | null>(null); // "YYYY-M"
+  const [monthLoading, setMonthLoading] = useState<string | null>(null);
+
   // ── API data ───────────────────────────────────────────────────────────────
   const { data: relation } = useGetRelation(relationId, { query: { enabled: !!relationId } });
   const { data: sessions } = useListAgentSessions(relationId, { query: { enabled: !!relationId } });
@@ -141,6 +148,15 @@ export default function Workspace() {
 
   useEffect(() => {
     loadInitial();
+  }, [relationId]);
+
+  // ── Load months list ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!relationId) return;
+    fetch(`/api/relations/${relationId}/messages/months`)
+      .then((r) => r.json())
+      .then((data) => setMonths(data.months ?? []))
+      .catch(() => {});
   }, [relationId]);
 
   // ── Load more (older) messages when sentinel becomes visible ───────────────
@@ -274,6 +290,126 @@ export default function Workspace() {
       agentScrollRef.current.scrollTop = agentScrollRef.current.scrollHeight;
     }
   }, [localMessages]);
+
+  // ── Send month to agent ────────────────────────────────────────────────────
+  const sendMonthToAgent = useCallback(
+    async (year: number, month: number) => {
+      if (isStreaming || !activeSessionId) return;
+      const key = `${year}-${month}`;
+      setMonthLoading(key);
+      setActiveMonth(key);
+
+      try {
+        const data = await fetch(
+          `/api/relations/${relationId}/messages?year=${year}&month=${month}&limit=1000`
+        ).then((r) => r.json());
+
+        const msgs: WaMessage[] = data.messages ?? [];
+        if (!msgs.length) {
+          toast({ title: "Mois vide", description: "Aucun message ce mois.", variant: "destructive" });
+          setMonthLoading(null);
+          return;
+        }
+
+        // Format as readable transcript
+        const formatted = msgs
+          .map((m) => {
+            const time = format(new Date(m.sentAt), "dd/MM HH:mm");
+            return `[${time}] ${m.sender}: ${m.content}`;
+          })
+          .join("\n");
+
+        const monthName = format(new Date(year, month - 1, 1), "MMMM yyyy", { locale: fr });
+        const prompt = `Analyse les échanges de ${monthName} (${msgs.length} messages). Quels schémas, tensions et moments clés ressortent ce mois-là ?`;
+
+        // Inject directly without touching paste state
+        await sendMessageDirect(prompt, formatted);
+      } catch {
+        toast({ title: "Erreur", description: "Impossible de charger ce mois.", variant: "destructive" });
+      } finally {
+        setMonthLoading(null);
+      }
+    },
+    [isStreaming, activeSessionId, relationId, toast]
+  );
+
+  // ── Send message (direct, bypasses paste state) ────────────────────────────
+  const sendMessageDirect = useCallback(
+    async (text: string, injectedContext?: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || !activeSessionId) return;
+
+      const userId = `u-${Date.now()}`;
+      const assistantId = `a-${Date.now()}`;
+
+      const displayContent = injectedContext
+        ? `${trimmed}\n\n[${injectedContext.split("\n").length} messages chargés]`
+        : trimmed;
+
+      setLocalMessages((prev) => [
+        ...prev,
+        { id: userId, role: "user", content: displayContent },
+        { id: assistantId, role: "assistant", content: "", isStreaming: true },
+      ]);
+      setIsStreaming(true);
+
+      try {
+        const res = await fetch(
+          `/api/relations/${relationId}/agent/sessions/${activeSessionId}/chat`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: trimmed,
+              pastedConversation: injectedContext || undefined,
+            }),
+          }
+        );
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            for (const line of part.split("\n")) {
+              const parsed = parseSSELine(line);
+              if (parsed.contextUsed?.length) setContextLabel(parsed.contextUsed.join(" · "));
+              if (parsed.content) {
+                setLocalMessages((prev) =>
+                  prev.map((m) => m.id === assistantId ? { ...m, content: m.content + parsed.content } : m)
+                );
+              }
+              if (parsed.done) {
+                setLocalMessages((prev) =>
+                  prev.map((m) => m.id === assistantId ? { ...m, isStreaming: false } : m)
+                );
+              }
+              if (parsed.error) {
+                setLocalMessages((prev) =>
+                  prev.map((m) => m.id === assistantId ? { ...m, content: parsed.error!, isStreaming: false } : m)
+                );
+              }
+            }
+          }
+        }
+      } catch {
+        toast({ title: "Erreur de connexion", description: "Impossible de joindre l'agent.", variant: "destructive" });
+        setLocalMessages((prev) =>
+          prev.map((m) => m.id === assistantId ? { ...m, content: "Une erreur est survenue.", isStreaming: false } : m)
+        );
+      } finally {
+        setIsStreaming(false);
+        setActiveMessageId(null);
+      }
+    },
+    [activeSessionId, relationId, toast]
+  );
 
   // ── Send message ───────────────────────────────────────────────────────────
   const sendMessage = useCallback(
@@ -456,8 +592,54 @@ export default function Workspace() {
           </div>
         </div>
 
-        {/* Messages — scrollable, with infinite scroll at the top */}
-        <div ref={waScrollRef} className="flex-1 overflow-y-auto min-h-0">
+        {/* Body — month strip + messages */}
+        <div className="flex flex-1 min-h-0">
+
+          {/* Month strip */}
+          {months.length > 0 && (
+            <div className="hidden md:flex flex-col w-14 border-r bg-background/60 overflow-y-auto shrink-0">
+              <div className="py-2 px-1 space-y-0.5">
+                {months.map((m) => {
+                  const key = `${m.year}-${m.month}`;
+                  const isActive = activeMonth === key;
+                  const isSpinning = monthLoading === key;
+                  const label = format(new Date(m.year, m.month - 1, 1), "MMM", { locale: fr });
+                  const yearShort = String(m.year).slice(2);
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => sendMonthToAgent(m.year, m.month)}
+                      disabled={isStreaming || !!monthLoading}
+                      title={`${format(new Date(m.year, m.month - 1, 1), "MMMM yyyy", { locale: fr })} — ${m.count.toLocaleString("fr-FR")} messages`}
+                      className={cn(
+                        "w-full flex flex-col items-center py-2 px-1 rounded-lg text-center transition-all group",
+                        isActive
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                        (isStreaming || !!monthLoading) && !isSpinning && "opacity-40 cursor-not-allowed"
+                      )}
+                    >
+                      {isSpinning ? (
+                        <Loader2 className="h-3 w-3 animate-spin mb-1" />
+                      ) : (
+                        <span className="text-[11px] font-semibold leading-none capitalize">{label}</span>
+                      )}
+                      <span className="text-[9px] leading-none mt-0.5 opacity-70">{yearShort}</span>
+                      <span className={cn(
+                        "text-[8px] leading-none mt-1 font-medium tabular-nums",
+                        isActive ? "text-primary/70" : "text-muted-foreground/60 group-hover:text-muted-foreground"
+                      )}>
+                        {m.count > 999 ? `${Math.round(m.count / 1000)}k` : m.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Messages — scrollable, with infinite scroll at the top */}
+          <div ref={waScrollRef} className="flex-1 overflow-y-auto min-h-0">
           <div className="space-y-4 max-w-2xl mx-auto pb-8 pt-4 px-4">
             {/* Top sentinel — triggers load of older messages */}
             <div ref={topSentinelRef} className="h-1" />
@@ -547,8 +729,9 @@ export default function Workspace() {
               })
             )}
           </div>
-        </div>
-      </div>
+          </div>{/* end waScroll */}
+        </div>{/* end body (month strip + messages) */}
+      </div>{/* end left panel */}
 
       {/* ── Right — Agent ──────────────────────────────────────────────────── */}
       <div

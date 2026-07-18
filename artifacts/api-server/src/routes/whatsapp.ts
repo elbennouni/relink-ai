@@ -390,10 +390,12 @@ router.get("/relations/:relationId/messages", async (req, res) => {
   const relationId = Number(req.params.relationId);
   if (isNaN(relationId)) { res.status(400).json({ error: "ID invalide" }); return; }
 
-  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  const limit = Math.min(Number(req.query.limit) || 50, 1000);
   const cursor = req.query.cursor as string | undefined;
   const search = req.query.search as string | undefined;
   const dateFilter = req.query.date as string | undefined;
+  const yearFilter  = req.query.year  ? Number(req.query.year)  : undefined;
+  const monthFilter = req.query.month ? Number(req.query.month) : undefined;
 
   let query = db
     .select()
@@ -413,6 +415,13 @@ router.get("/relations/:relationId/messages", async (req, res) => {
     next.setDate(next.getDate() + 1);
     query = query.where(
       and(gte(whatsappMessagesTable.sentAt, d), lt(whatsappMessagesTable.sentAt, next))
+    ) as typeof query;
+  }
+  if (yearFilter && monthFilter) {
+    const from = new Date(yearFilter, monthFilter - 1, 1);
+    const to   = new Date(yearFilter, monthFilter, 1);
+    query = query.where(
+      and(gte(whatsappMessagesTable.sentAt, from), lt(whatsappMessagesTable.sentAt, to))
     ) as typeof query;
   }
 
@@ -443,6 +452,31 @@ router.get("/relations/:relationId/messages", async (req, res) => {
     nextCursor: hasMore ? items[items.length - 1].sentAt.toISOString() : null,
     total: total?.count ?? 0,
   });
+});
+
+// GET /api/relations/:relationId/messages/months  — list months that have messages
+router.get("/relations/:relationId/messages/months", async (req, res) => {
+  const relationId = Number(req.params.relationId);
+  if (isNaN(relationId)) { res.status(400).json({ error: "ID invalide" }); return; }
+
+  const rows = await db
+    .select({
+      year:  sql<number>`EXTRACT(YEAR  FROM ${whatsappMessagesTable.sentAt})::int`,
+      month: sql<number>`EXTRACT(MONTH FROM ${whatsappMessagesTable.sentAt})::int`,
+      count: count(),
+    })
+    .from(whatsappMessagesTable)
+    .where(eq(whatsappMessagesTable.relationId, relationId))
+    .groupBy(
+      sql`EXTRACT(YEAR  FROM ${whatsappMessagesTable.sentAt})`,
+      sql`EXTRACT(MONTH FROM ${whatsappMessagesTable.sentAt})`,
+    )
+    .orderBy(
+      sql`EXTRACT(YEAR  FROM ${whatsappMessagesTable.sentAt}) DESC`,
+      sql`EXTRACT(MONTH FROM ${whatsappMessagesTable.sentAt}) DESC`,
+    );
+
+  res.json({ months: rows });
 });
 
 // GET /api/relations/:relationId/messages/stats  (pure SQL, no full table scan in memory)
