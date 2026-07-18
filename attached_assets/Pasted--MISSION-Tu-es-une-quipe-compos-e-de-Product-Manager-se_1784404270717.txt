@@ -1,0 +1,274 @@
+# MISSION
+
+Tu es une équipe composée de :
+
+* Product Manager senior
+* UX Designer senior
+* CTO SaaS
+* Architecte IA
+* Développeur Full Stack
+* Expert psychologie de la communication
+* Expert expérience utilisateur
+
+Vous devez imaginer puis développer **depuis zéro** le meilleur SaaS IA au monde destiné aux personnes vivant une rupture amoureuse ou une relation compliquée.
+
+Vous partez d'une feuille blanche.
+
+Vous n'avez aucune contrainte liée à un projet existant.
+
+Vous pouvez remettre en question toutes les idées proposées.
+
+Votre objectif n'est pas de coder le plus vite possible.
+
+Votre objectif est de créer le meilleur produit possible.
+
+---
+
+# LE PROBLÈME
+
+Chaque année, des millions de personnes vivent :
+
+* une rupture ;
+* un divorce ;
+* une séparation ;
+* une relation ambiguë ;
+* une relation toxique ;
+* une période de non-contact.
+
+Ces personnes sont souvent :
+
+* perdues ;
+* impulsives ;
+* anxieuses ;
+* obsédées par les messages.
+
+Elles prennent souvent de mauvaises décisions.
+
+Elles envoient trop de messages.
+
+Réagissent trop vite.
+
+Interprètent mal les réponses.
+
+Se mettent dans une position de dépendance émotionnelle.
+
+Le produit doit les aider à retrouver de la lucidité.
+
+---
+
+# CE QUE LE PRODUIT NE DOIT PAS ÊTRE
+
+Ce n'est pas :
+
+* un logiciel de manipulation ;
+* un logiciel pour récupérer son ex à tout prix ;
+* un logiciel de harcèlement ;
+* un logiciel de séduction.
+
+---
+
+# CE QUE LE PRODUIT DOIT ÊTRE
+
+Un copilote IA.
+
+Il connaît l'histoire de la relation.
+
+Il aide l'utilisateur à comprendre.
+
+Il aide l'utilisateur à mieux communiquer.
+
+Il aide l'utilisateur à retrouver sa dignité.
+
+Il aide l'utilisateur à prendre de meilleures décisions.
+
+Il accompagne l'utilisateur pendant plusieurs mois.
+
+---
+
+# JE VOUS DEMANDE DE TOUT INVENTER
+
+Imaginez :
+
+* la meilleure UX ;
+* la meilleure architecture ;
+* les meilleurs écrans ;
+* le meilleur onboarding ;
+* le meilleur système de mémoire IA ;
+* la meilleure manière d'importer les conversations ;
+* la meilleure manière d'ajouter de nouveaux messages ;
+* le meilleur chatbot ;
+* le meilleur système de réponses.
+
+Ne supposez pas que mes idées sont les meilleures.
+
+Challengez-les.
+
+Si vous trouvez une meilleure approche, adoptez-la.
+
+---
+
+# IMPORT
+
+Réfléchissez au meilleur moyen de donner du contexte à l'IA.
+
+Peut-être :
+
+* export WhatsApp ;
+* captures d'écran ;
+* copier/coller ;
+* import progressif ;
+* résumé automatique ;
+* mémoire hiérarchique ;
+* autre idée.
+
+Choisissez ce qui vous semble optimal.
+
+---
+
+# IA
+
+L'IA doit donner l'impression de connaître parfaitement la relation.
+
+Elle doit pouvoir répondre naturellement à des questions comme :
+
+Pourquoi répond-elle comme ça ?
+
+Que montre notre historique ?
+
+Compare avec le mois dernier.
+
+Résume notre histoire.
+
+Analyse cette capture.
+
+Prépare une réponse.
+
+Dois-je répondre maintenant ?
+
+Elle doit expliquer son raisonnement.
+
+Toujours distinguer :
+
+* faits ;
+* hypothèses ;
+* limites.
+
+---
+
+# MÉMOIRE
+
+Inventez la meilleure mémoire IA possible.
+
+Elle doit être :
+
+* rapide ;
+* peu coûteuse ;
+* évolutive ;
+* incrémentale.
+
+Vous êtes libres de choisir :
+
+* RAG ;
+* embeddings ;
+* graphes ;
+* résumés ;
+* mémoire hybride ;
+* ou toute autre approche.
+
+Justifiez vos choix.
+
+---
+
+# UX
+
+Je veux que le produit soit tellement simple que ma mère puisse l'utiliser.
+
+Objectif :
+
+30 secondes pour comprendre l'application.
+
+Ne créez pas une interface complexe.
+
+---
+
+# DESIGN
+
+Le produit doit sembler :
+
+haut de gamme
+
+rassurant
+
+humain
+
+élégant
+
+minimaliste
+
+premium
+
+Il doit donner confiance.
+
+---
+
+# ARCHITECTURE
+
+Choisissez la stack technique que vous estimez la meilleure en 2026.
+
+Expliquez pourquoi.
+
+Choisissez librement :
+
+framework
+
+base
+
+cache
+
+queue
+
+IA
+
+hébergement
+
+OCR
+
+recherche
+
+stockage
+
+sécurité
+
+---
+
+# PERFORMANCE
+
+Le produit doit supporter :
+
+100 000 messages
+
+sans ralentissement visible.
+
+---
+
+# MVP
+
+Concevez d'abord le meilleur MVP.
+
+Puis construisez une roadmap jusqu'à une V1 complète.
+
+---
+
+# OBJECTIF
+
+Je ne veux pas simplement un logiciel.
+
+Je veux créer une entreprise mondiale.
+
+Imaginez un produit capable de devenir la référence mondiale de l'accompagnement IA après une rupture.
+
+N'ayez pas peur de remettre en question toutes mes idées.
+
+Votre mission est de concevoir un produit meilleur que celui que j'aurais imaginé moi-même.
+
+Une fois votre vision définie, commencez immédiatement le développement de cette version, étape par étape, directement dans Replit, avec une interface testable dès les premières itérations.
