@@ -18,6 +18,7 @@ import {
   Paperclip,
   X,
   ChevronUp,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -122,9 +123,11 @@ export default function Workspace() {
   }, [sessions]);
 
   // ── Load initial WhatsApp messages ─────────────────────────────────────────
-  useEffect(() => {
+  const loadInitial = useCallback(() => {
     if (!relationId) return;
     setWaLoading(true);
+    setWaMessages([]);
+    setNextCursor(null);
     fetch(`/api/relations/${relationId}/messages?limit=60`)
       .then((r) => r.json())
       .then((data) => {
@@ -134,6 +137,10 @@ export default function Workspace() {
       })
       .catch(() => {})
       .finally(() => setWaLoading(false));
+  }, [relationId]);
+
+  useEffect(() => {
+    loadInitial();
   }, [relationId]);
 
   // ── Load more (older) messages when sentinel becomes visible ───────────────
@@ -432,9 +439,21 @@ export default function Workspace() {
               </div>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground">
-            <Search className="h-5 w-5" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground">
+              <Search className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full text-muted-foreground"
+              title="Mettre à jour la conversation"
+              onClick={loadInitial}
+              disabled={waLoading}
+            >
+              <RefreshCw className={cn("h-4 w-4", waLoading && "animate-spin")} />
+            </Button>
+          </div>
         </div>
 
         {/* Messages — scrollable, with infinite scroll at the top */}
