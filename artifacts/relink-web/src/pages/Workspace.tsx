@@ -78,18 +78,75 @@ export default function Workspace() {
     }
   }, [sessions]);
 
+  const [introTriggered, setIntroTriggered] = useState(false);
+
   // Seed local messages from session data on first load
   useEffect(() => {
     if (sessionData?.messages && localMessages.length === 0) {
-      setLocalMessages(
-        sessionData.messages.map((m) => ({
-          id: String(m.id),
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        }))
-      );
+      if (sessionData.messages.length > 0) {
+        // Session already has messages — restore them
+        setLocalMessages(
+          sessionData.messages.map((m) => ({
+            id: String(m.id),
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }))
+        );
+      } else if (!introTriggered) {
+        // New empty session — auto-generate intro
+        triggerIntro(sessionData.id as number);
+      }
     }
   }, [sessionData]);
+
+  const triggerIntro = async (sessionId: number) => {
+    setIntroTriggered(true);
+    const assistantId = `intro-${Date.now()}`;
+    setLocalMessages([{ id: assistantId, role: "assistant", content: "", isStreaming: true }]);
+    setIsStreaming(true);
+
+    try {
+      const res = await fetch(
+        `/api/relations/${relationId}/agent/sessions/${sessionId}/intro`,
+        { method: "POST", headers: { "Content-Type": "application/json" } }
+      );
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          for (const line of part.split("\n")) {
+            const parsed = parseSSELine(line);
+            if (parsed.contextUsed?.length) setContextLabel(parsed.contextUsed.join(" · "));
+            if (parsed.content) {
+              setLocalMessages((prev) =>
+                prev.map((m) => m.id === assistantId ? { ...m, content: m.content + parsed.content } : m)
+              );
+            }
+            if (parsed.done) {
+              setLocalMessages((prev) =>
+                prev.map((m) => m.id === assistantId ? { ...m, isStreaming: false } : m)
+              );
+            }
+          }
+        }
+      }
+    } catch {
+      setLocalMessages((prev) =>
+        prev.map((m) => m.id === assistantId ? { ...m, content: "Je suis prêt à analyser votre relation. Posez-moi une question.", isStreaming: false } : m)
+      );
+    } finally {
+      setIsStreaming(false);
+    }
+  };
 
   // Auto-scroll on new content
   useEffect(() => {
