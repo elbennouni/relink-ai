@@ -81,6 +81,9 @@ type Memory = {
   currentPhase?: string | null;
   recurringTopics?: unknown;
   expressedLimits?: unknown;
+  openQuestions?: unknown;
+  importantEvents?: unknown;
+  communicationTrends?: unknown;
   dynamicReport?: unknown;
 };
 
@@ -131,49 +134,89 @@ function buildSystemPrompt(
   const me = relation.participantMe;
   const other = relation.participantOther;
 
+  const hasMem = !!(mem?.globalSummary || mem?.dynamicReport);
+
   let systemPrompt = `Tu es ReLink AI, un copilote stratégique expert en dynamiques relationnelles et rapports de force.
 
 TU PARLES DIRECTEMENT AVEC : ${me}
-C'est ${me} qui t'écrit. Quand tu dis "vous" ou "tu", tu t'adresses à ${me}.
-L'autre personne dans la relation est : ${other} — tu n'as pas accès à elle, tu l'analyses à travers les messages.
+C'est ${me} qui t'écrit. Quand tu dis "tu", tu t'adresses à ${me}. L'autre personne est ${other}.
 
 TA MISSION : aider ${me} à comprendre et rééquilibrer le rapport de force avec ${other}.
 
-PRINCIPES FONDAMENTAUX:
-- Tu as lu et analysé TOUTE la conversation (${totalMessages} messages au total). Tu connais les patterns, les tensions, l'histoire.
+RÈGLES ABSOLUES :
+- Tu as analysé l'INTÉGRALITÉ de la conversation (${totalMessages} messages). Tu connais cette relation par cœur — les faits, les patterns, l'histoire, les basculements. Parle TOUJOURS avec cette certitude. Ne dis jamais "je n'ai pas accès à tes messages" ou "je ne peux pas voir" — tu as fait l'analyse complète.
+- Si tu n'as pas le détail verbatim d'un message précis, tu te bases sur ta connaissance des patterns généraux que tu as analysés.
 - Tu analyses avec lucidité et sans complaisance. Tu dis la vérité même inconfortable.
-- Tu donnes des conseils CONCRETS et ACTIONNABLES. Si on te montre un message, tu proposes une réponse précise avec l'intention stratégique.
-- Tu distingues toujours les faits observables des hypothèses.
-- Tu ne promets jamais le retour d'un ex ni le contrôle d'une autre personne — mais tu aides ${me} à reprendre le contrôle de SES comportements.
+- Conseils CONCRETS et ACTIONNABLES uniquement. Si on te montre un message, tu proposes une réponse précise avec l'intention stratégique.
 - Tu réponds en français, avec empathie mais surtout avec clarté stratégique.
 - Quand tu cites un message, précise qui l'a écrit : "${me}" ou "${other}".`;
 
+  // ── Mémoire complète ─────────────────────────────────────────────────────
+  if (hasMem) {
+    systemPrompt += `\n\n${"━".repeat(50)}\nMÉMOIRE RELATIONNELLE — ANALYSE COMPLÈTE DES ${totalMessages} MESSAGES\n${"━".repeat(50)}`;
+    contextUsed.push("mémoire relationnelle");
+  }
+
   if (mem?.globalSummary) {
-    systemPrompt += `\n\n━━━ CONTEXTE DE LA RELATION ━━━\n${mem.globalSummary}`;
-    contextUsed.push("mémoire globale");
+    systemPrompt += `\n\n▸ RÉSUMÉ DE LA RELATION :\n${mem.globalSummary}`;
   }
 
   if (mem?.currentPhase) {
-    systemPrompt += `\nPhase actuelle: ${mem.currentPhase}`;
-  }
-
-  if (mem?.recurringTopics && Array.isArray(mem.recurringTopics) && mem.recurringTopics.length) {
-    systemPrompt += `\nSujets récurrents: ${(mem.recurringTopics as string[]).join(", ")}`;
-  }
-
-  if (mem?.expressedLimits && Array.isArray(mem.expressedLimits) && mem.expressedLimits.length) {
-    systemPrompt += `\nLimites exprimées: ${(mem.expressedLimits as string[]).join(", ")}`;
+    systemPrompt += `\n\n▸ PHASE ACTUELLE :\n${mem.currentPhase}`;
   }
 
   const report = mem?.dynamicReport as Record<string, unknown> | undefined;
+
+  // Communication dynamics from dynamicReport
+  if (report) {
+    const dynParts: string[] = [];
+    if (report.whoInitiates)   dynParts.push(`Qui initie : ${report.whoInitiates}`);
+    if (report.whoFollowsUp)   dynParts.push(`Qui relance : ${report.whoFollowsUp}`);
+    if (report.avgResponseTime) dynParts.push(`Temps de réponse : ${report.avgResponseTime}`);
+    if (report.messageFrequency) dynParts.push(`Fréquence : ${report.messageFrequency}`);
+    if (report.recentChanges)  dynParts.push(`Évolution récente : ${report.recentChanges}`);
+    if (dynParts.length) {
+      systemPrompt += `\n\n▸ DYNAMIQUE DE COMMUNICATION :\n${dynParts.map(p => `• ${p}`).join("\n")}`;
+    }
+
+    if (Array.isArray(report.observableFacts) && report.observableFacts.length) {
+      systemPrompt += `\n\n▸ FAITS OBSERVABLES :\n${(report.observableFacts as string[]).map(f => `• ${f}`).join("\n")}`;
+    }
+
+    if (Array.isArray(report.trends) && report.trends.length) {
+      systemPrompt += `\n\n▸ TENDANCES OBSERVÉES :\n${(report.trends as string[]).map(t => `• ${t}`).join("\n")}`;
+    }
+
+    if (Array.isArray(report.recurringConflicts) && report.recurringConflicts.length) {
+      systemPrompt += `\n\n▸ CONFLITS RÉCURRENTS :\n${(report.recurringConflicts as string[]).map(c => `• ${c}`).join("\n")}`;
+    }
+  }
+
+  if (mem?.recurringTopics && Array.isArray(mem.recurringTopics) && mem.recurringTopics.length) {
+    systemPrompt += `\n\n▸ SUJETS RÉCURRENTS :\n${(mem.recurringTopics as string[]).map(t => `• ${t}`).join("\n")}`;
+  }
+
+  if (mem?.importantEvents && Array.isArray(mem.importantEvents) && mem.importantEvents.length) {
+    systemPrompt += `\n\n▸ ÉVÉNEMENTS CLÉS :\n${(mem.importantEvents as string[]).map(e => `• ${e}`).join("\n")}`;
+  }
+
+  if (mem?.expressedLimits && Array.isArray(mem.expressedLimits) && mem.expressedLimits.length) {
+    systemPrompt += `\n\n▸ LIMITES EXPRIMÉES :\n${(mem.expressedLimits as string[]).map(l => `• ${l}`).join("\n")}`;
+  }
+
+  if (mem?.openQuestions && Array.isArray(mem.openQuestions) && mem.openQuestions.length) {
+    systemPrompt += `\n\n▸ QUESTIONS SANS RÉPONSE :\n${(mem.openQuestions as string[]).map(q => `• ${q}`).join("\n")}`;
+  }
+
+  // Power dynamics
   const pd = report?.powerDynamics as Record<string, unknown> | undefined;
 
   if (pd) {
-    systemPrompt += `\n\n━━━ DYNAMIQUE DE POUVOIR (ANALYSE COMPLÈTE) ━━━`;
+    systemPrompt += `\n\n${"━".repeat(50)}\nDYNAMIQUE DE POUVOIR\n${"━".repeat(50)}`;
+    contextUsed.push("dynamique de pouvoir");
 
     if (pd.currentDynamicSummary) {
-      systemPrompt += `\n\nSITUATION ACTUELLE:\n${pd.currentDynamicSummary}`;
-      contextUsed.push("dynamique de pouvoir");
+      systemPrompt += `\n\n▸ SITUATION ACTUELLE :\n${pd.currentDynamicSummary}`;
     }
 
     if (typeof pd.imbalanceScore === "number") {
@@ -184,44 +227,44 @@ PRINCIPES FONDAMENTAUX:
         score < 2  ? "Relation relativement équilibrée" :
         score < 5  ? `Légère dominance de ${me}` :
                      `Fort avantage pour ${me}`;
-      systemPrompt += `\nScore de déséquilibre: ${score}/10 (${label})`;
+      systemPrompt += `\n▸ Score de déséquilibre : ${score}/10 (${label})`;
     }
 
     if (Array.isArray(pd.dominancePatterns) && pd.dominancePatterns.length) {
-      systemPrompt += `\n\nPATTERNS DE DOMINATION OBSERVÉS:\n${(pd.dominancePatterns as string[]).map(p => `• ${p}`).join("\n")}`;
+      systemPrompt += `\n\n▸ PATTERNS DE DOMINATION DE ${other} :\n${(pd.dominancePatterns as string[]).map(p => `• ${p}`).join("\n")}`;
     }
 
     if (Array.isArray(pd.submissivePatterns) && pd.submissivePatterns.length) {
-      systemPrompt += `\n\nCOMPORTEMENTS SOUMIS DE ${me}:\n${(pd.submissivePatterns as string[]).map(p => `• ${p}`).join("\n")}`;
+      systemPrompt += `\n\n▸ COMPORTEMENTS SOUMIS DE ${me} (à corriger) :\n${(pd.submissivePatterns as string[]).map(p => `• ${p}`).join("\n")}`;
     }
 
     if (Array.isArray(pd.tensionPoints) && pd.tensionPoints.length) {
       const tensions = pd.tensionPoints as Array<Record<string, string>>;
-      systemPrompt += `\n\nTENSIONS RÉCURRENTES:\n${tensions.map(t =>
-        `• Déclencheur: ${t.trigger} → ${t.pattern}`
+      systemPrompt += `\n\n▸ TENSIONS RÉCURRENTES :\n${tensions.map(t =>
+        `• Déclencheur : ${t.trigger} → ${t.pattern} (monte : ${t.whoEscalates}, calme : ${t.whoDeescalates})`
       ).join("\n")}`;
     }
 
     if (Array.isArray(pd.powerShifts) && pd.powerShifts.length) {
-      systemPrompt += `\n\nBASSCULEMENTS DE POUVOIR:\n${(pd.powerShifts as string[]).map(p => `• ${p}`).join("\n")}`;
+      systemPrompt += `\n\n▸ BASCULEMENTS DE POUVOIR :\n${(pd.powerShifts as string[]).map(p => `• ${p}`).join("\n")}`;
     }
 
     const rs = pd.reversalStrategy as Record<string, unknown> | undefined;
     if (rs) {
-      systemPrompt += `\n\n━━━ STRATÉGIE DE RÉÉQUILIBRAGE ━━━`;
-      if (rs.mainPrinciple) systemPrompt += `\nPrincipe clé: ${rs.mainPrinciple}`;
+      systemPrompt += `\n\n${"━".repeat(50)}\nSTRATÉGIE DE RÉÉQUILIBRAGE\n${"━".repeat(50)}`;
+      if (rs.mainPrinciple) systemPrompt += `\n▸ Principe clé : ${rs.mainPrinciple}`;
       if (Array.isArray(rs.behaviorsToStop) && rs.behaviorsToStop.length) {
-        systemPrompt += `\nÀ ARRÊTER IMMÉDIATEMENT:\n${(rs.behaviorsToStop as string[]).map(b => `• ${b}`).join("\n")}`;
+        systemPrompt += `\n▸ À ARRÊTER IMMÉDIATEMENT :\n${(rs.behaviorsToStop as string[]).map(b => `• ${b}`).join("\n")}`;
       }
       if (Array.isArray(rs.behaviorsToAdopt) && rs.behaviorsToAdopt.length) {
-        systemPrompt += `\nÀ ADOPTER:\n${(rs.behaviorsToAdopt as string[]).map(b => `• ${b}`).join("\n")}`;
+        systemPrompt += `\n▸ À ADOPTER :\n${(rs.behaviorsToAdopt as string[]).map(b => `• ${b}`).join("\n")}`;
       }
       if (Array.isArray(rs.messagingPrinciples) && rs.messagingPrinciples.length) {
-        systemPrompt += `\nPRINCIPES POUR LES MESSAGES:\n${(rs.messagingPrinciples as string[]).map(b => `• ${b}`).join("\n")}`;
+        systemPrompt += `\n▸ PRINCIPES DE MESSAGING :\n${(rs.messagingPrinciples as string[]).map(b => `• ${b}`).join("\n")}`;
       }
     }
 
-    systemPrompt += `\n\nTu dois garder toute cette analyse en tête dans CHAQUE réponse. Quand l'utilisateur te montre un message ou te demande quoi répondre, applique toujours ces principes stratégiques pour l'aider à rééquilibrer le rapport de force.`;
+    systemPrompt += `\n\nApplique TOUJOURS cette analyse dans tes réponses. Ne dis jamais que tu n'as pas les informations — tu as fait l'analyse complète.`;
   }
 
   if (recentMessages.length) {
