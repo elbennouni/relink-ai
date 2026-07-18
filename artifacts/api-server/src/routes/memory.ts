@@ -91,30 +91,105 @@ router.post("/relations/:relationId/memory/build", async (req, res) => {
       res.end(); return;
     }
 
-    send({ step: "encrypting", label: "Chiffrement", progress: 40 });
+    send({ step: "encrypting", label: "Chiffrement sécurisé", progress: 35 });
 
-    // Build hierarchical memory — sample recent + older messages
-    const recent = messages.slice(-200);
-    const older = messages.slice(0, Math.min(100, messages.length - 200));
-    const sample = [...older, ...recent];
+    // ── Compression helpers ────────────────────────────────────────────────────
+    const me = relation.participantMe;
+    const other = relation.participantOther;
+    // Compact format: "Me: text" or "Eux: text" with optional date markers
+    function compressChunk(
+      msgs: typeof messages,
+      withDates = false
+    ): string {
+      let out = "";
+      let lastDate = "";
+      for (const m of msgs) {
+        const date = m.sentAt.toISOString().split("T")[0];
+        if (withDates && date !== lastDate) {
+          out += `\n── ${date} ──\n`;
+          lastDate = date;
+        }
+        out += `${m.isMe ? "Moi" : other}: ${m.content}\n`;
+      }
+      return out.trim();
+    }
 
-    const transcript = sample
-      .map(m => `[${m.sentAt.toISOString().split("T")[0]}] ${m.isMe ? relation.participantMe : relation.participantOther}: ${m.content}`)
-      .join("\n");
+    // ── Strategy: send ALL if ≤ 8 000 messages, else chunk-summarise ──────────
+    const DIRECT_LIMIT = 8000;
+    const CHUNK_SIZE   = 2000;
 
-    send({ step: "building", label: "Construction de la mémoire relationnelle", progress: 60 });
+    let conversationContext: string;
+
+    if (messages.length <= DIRECT_LIMIT) {
+      // ── DIRECT: full conversation compressed ────────────────────────────────
+      send({ step: "building", label: `Lecture intégrale — ${messages.length} messages`, progress: 55 });
+      conversationContext = `CONVERSATION COMPLÈTE (${messages.length} messages) :\n${compressChunk(messages, true)}`;
+
+    } else {
+      // ── CHUNKED: summarise each slice, then synthesise ───────────────────────
+      const chunks: typeof messages[] = [];
+      for (let i = 0; i < messages.length; i += CHUNK_SIZE) {
+        chunks.push(messages.slice(i, i + CHUNK_SIZE));
+      }
+
+      const chunkSummaries: string[] = [];
+
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const chunk = chunks[ci];
+        const pct = Math.round(40 + (ci / chunks.length) * 35);
+        const firstDate = chunk[0].sentAt.toISOString().split("T")[0];
+        const lastDate  = chunk[chunk.length - 1].sentAt.toISOString().split("T")[0];
+        send({
+          step: "building",
+          label: `Analyse tranche ${ci + 1}/${chunks.length} (${firstDate} → ${lastDate})`,
+          progress: pct,
+        });
+
+        const chunkText = compressChunk(chunk, true);
+        const summaryResp = await anthropic.messages.create({
+          model: "claude-haiku-4-5",
+          max_tokens: 1200,
+          messages: [{
+            role: "user",
+            content: `Résume cette tranche de conversation entre ${me} (Moi) et ${other} en 3-6 phrases.
+Couvre : qui initie, qui poursuit, le ton général, les tensions, événements importants, et tout changement de dynamique de pouvoir.
+Sois factuel et précis. Pas de conclusion générale — juste ce qui se passe dans CETTE tranche.
+
+TRANCHE (${firstDate} → ${lastDate}) :
+${chunkText}
+
+Résumé :`,
+          }],
+        });
+
+        const summaryBlock = summaryResp.content[0];
+        const summary = summaryBlock.type === "text" ? summaryBlock.text.trim() : "";
+        chunkSummaries.push(`[${firstDate} → ${lastDate}] ${summary}`);
+      }
+
+      // Last 300 messages verbatim for recency detail
+      const recent300 = compressChunk(messages.slice(-300), true);
+      conversationContext = `RÉSUMÉS PAR PÉRIODE (${messages.length} messages au total, ${chunks.length} tranches) :
+${chunkSummaries.join("\n\n")}
+
+DERNIERS 300 MESSAGES VERBATIM (le plus récent) :
+${recent300}`;
+
+      send({ step: "building", label: "Synthèse finale de toute la conversation", progress: 78 });
+    }
+
+    send({ step: "building", label: "Analyse des dynamiques de pouvoir", progress: 82 });
 
     const aiResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 8192,
       messages: [{
         role: "user",
-        content: `Tu es un expert en psychologie relationnelle et en dynamiques de pouvoir dans les relations amoureuses. Analyse cette conversation entre ${relation.participantMe} (MOI — l'utilisateur de l'application) et ${relation.participantOther} et construis une mémoire relationnelle structurée avec une analyse approfondie des dynamiques de pouvoir.
+        content: `Tu es un expert en psychologie relationnelle et en dynamiques de pouvoir dans les relations amoureuses. Analyse cette conversation entre ${me} (MOI — l'utilisateur de l'application) et ${other} et construis une mémoire relationnelle structurée avec une analyse approfondie des dynamiques de pouvoir.
 
-CONVENTION IMPORTANTE: "${relation.participantMe}" = MOI (l'utilisateur qui cherche de l'aide). "${relation.participantOther}" = L'AUTRE personne.
+CONVENTION IMPORTANTE: "${me}" = MOI (l'utilisateur qui cherche de l'aide). "${other}" = L'AUTRE personne.
 
-CONVERSATION (${messages.length} messages au total, extrait représentatif):
-${transcript}
+${conversationContext}
 
 Analyse avec précision:
 1. QUI INITIE le plus souvent les conversations, les réconciliations, les sujets
@@ -143,14 +218,14 @@ Retourne un JSON avec exactement ces champs:
     "dominantPerson": "Nom de la personne qui a le plus de pouvoir/contrôle dans la relation actuellement",
     "submissivePerson": "Nom de la personne qui s'adapte, concède, poursuit",
     "imbalanceScore": 0,
-    "imbalanceDirection": "vers ${relation.participantOther} ou équilibré ou vers ${relation.participantMe}",
+    "imbalanceDirection": "vers ${other} ou équilibré ou vers ${me}",
     "dominancePatterns": [
-      "Pattern précis 1: ex '${relation.participantOther} laisse souvent ${relation.participantMe} sans réponse pendant X heures puis répond froidement'",
+      "Pattern précis 1: ex '${other} laisse souvent ${me} sans réponse pendant X heures puis répond froidement'",
       "Pattern précis 2",
       "Pattern précis 3"
     ],
     "submissivePatterns": [
-      "Pattern précis 1: ex '${relation.participantMe} envoie plusieurs messages sans réponse, s'excuse en premier'",
+      "Pattern précis 1: ex '${me} envoie plusieurs messages sans réponse, s'excuse en premier'",
       "Pattern précis 2"
     ],
     "tensionPoints": [
@@ -163,7 +238,7 @@ Retourne un JSON avec exactement ces champs:
       }
     ],
     "powerShifts": [
-      "Moment où le rapport de force a basculé, ex: 'Après l'événement X, ${relation.participantMe} a commencé à poursuivre plus'"
+      "Moment où le rapport de force a basculé, ex: 'Après l'événement X, ${me} a commencé à poursuivre plus'"
     ],
     "currentDynamicSummary": "Paragraphe de 2-3 phrases décrivant la dynamique actuelle de façon directe et honnête",
     "reversalStrategy": {
@@ -214,9 +289,9 @@ Retourne un JSON avec exactement ces champs:
 }
 
 IMPORTANT: Pour imbalanceScore, utilise une échelle de -10 à +10:
-- -10 = ${relation.participantOther} a un contrôle total, ${relation.participantMe} est complètement en position de faiblesse
+- -10 = ${other} a un contrôle total, ${me} est complètement en position de faiblesse
 - 0 = relation équilibrée
-- +10 = ${relation.participantMe} a le contrôle total
+- +10 = ${me} a le contrôle total
 
 Sois direct et honnête dans l'analyse, même si c'est inconfortable. L'utilisateur a besoin de voir la réalité pour agir.
 Retourne uniquement le JSON, sans markdown ni texte autour.`,
