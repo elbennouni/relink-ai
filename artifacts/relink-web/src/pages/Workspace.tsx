@@ -19,6 +19,9 @@ import {
   X,
   ChevronUp,
   RefreshCw,
+  UploadCloud,
+  CheckCircle2,
+  BrainCircuit,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -111,6 +114,13 @@ export default function Workspace() {
   const [activeMonth, setActiveMonth] = useState<string | null>(null); // "YYYY-M"
   const [monthLoading, setMonthLoading] = useState<string | null>(null);
 
+  // ── Upload state ───────────────────────────────────────────────────────────
+  type UploadPhase = "idle" | "importing" | "building" | "done";
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
+  const [uploadSteps, setUploadSteps] = useState<string[]>([]);
+  const [uploadImported, setUploadImported] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // ── API data ───────────────────────────────────────────────────────────────
   const { data: relation } = useGetRelation(relationId, { query: { enabled: !!relationId } });
   const { data: sessions } = useListAgentSessions(relationId, { query: { enabled: !!relationId } });
@@ -158,6 +168,86 @@ export default function Workspace() {
       .then((data) => setMonths(data.months ?? []))
       .catch(() => {});
   }, [relationId]);
+
+  // ── File upload handler ────────────────────────────────────────────────────
+  const handleFileUpload = useCallback(async (file: File) => {
+    if (!relationId) return;
+    setUploadPhase("importing");
+    setUploadSteps(["Lecture du fichier…"]);
+    setUploadImported(null);
+
+    try {
+      const content = await file.text();
+
+      // 1. Import
+      const importRes = await fetch(`/api/relations/${relationId}/import/whatsapp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, filename: file.name }),
+      });
+      if (!importRes.ok) throw new Error(`Import échoué (${importRes.status})`);
+      const importData = await importRes.json();
+      setUploadImported(importData.imported ?? 0);
+      setUploadSteps((p) => [...p, `${(importData.imported ?? 0).toLocaleString("fr-FR")} messages importés ✓`]);
+
+      // 2. Build memory (SSE)
+      setUploadPhase("building");
+      const STEP_LABELS: Record<string, string> = {
+        reading:    "Lecture de la conversation…",
+        detecting:  "Détection des messages…",
+        encrypting: "Chiffrement sécurisé…",
+        building:   "Analyse des dynamiques et construction de la mémoire…",
+        saving:     "Enregistrement…",
+        done:       "Analyse complète ✓",
+      };
+
+      const memRes = await fetch(`/api/relations/${relationId}/memory/build`, { method: "POST" });
+      if (!memRes.ok || !memRes.body) throw new Error("Memory build échoué");
+
+      const reader = memRes.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          for (const line of part.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const ev = JSON.parse(line.slice(6));
+              if (ev.step) {
+                const label = STEP_LABELS[ev.step] ?? ev.label ?? ev.step;
+                setUploadSteps((p) => p[p.length - 1] === label ? p : [...p, label]);
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      }
+
+      // 3. Done — refresh everything
+      setUploadPhase("done");
+      loadInitial();
+      // Reload months
+      fetch(`/api/relations/${relationId}/messages/months`)
+        .then((r) => r.json())
+        .then((d) => setMonths(d.months ?? []))
+        .catch(() => {});
+
+      // Auto-dismiss after 3s
+      setTimeout(() => setUploadPhase("idle"), 3000);
+
+    } catch (err) {
+      toast({
+        title: "Erreur d'import",
+        description: err instanceof Error ? err.message : "Une erreur est survenue.",
+        variant: "destructive",
+      });
+      setUploadPhase("idle");
+    }
+  }, [relationId, loadInitial, toast]);
 
   // ── Load more (older) messages when sentinel becomes visible ───────────────
   const loadMore = useCallback(async () => {
@@ -797,6 +887,62 @@ export default function Workspace() {
           className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-8 pb-4 px-4 md:px-6"
         >
           <div className="max-w-2xl mx-auto space-y-2">
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFileUpload(f);
+                e.target.value = "";
+              }}
+            />
+
+            {/* Upload progress panel */}
+            {uploadPhase !== "idle" && (
+              <div className="animate-in slide-in-from-bottom-2 fade-in bg-card border rounded-2xl overflow-hidden shadow-md">
+                <div className="flex items-center justify-between px-4 py-2 border-b bg-primary/5">
+                  <span className="text-xs font-semibold text-primary flex items-center gap-1.5">
+                    {uploadPhase === "done" ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                    ) : (
+                      <BrainCircuit className="h-3.5 w-3.5 animate-pulse" />
+                    )}
+                    {uploadPhase === "importing" && "Import en cours…"}
+                    {uploadPhase === "building" && "Construction de la mémoire…"}
+                    {uploadPhase === "done" && `Prêt — ${uploadImported?.toLocaleString("fr-FR") ?? ""} messages analysés`}
+                  </span>
+                  {uploadPhase === "done" && (
+                    <button onClick={() => setUploadPhase("idle")} className="text-muted-foreground hover:text-foreground">
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <div className="px-4 py-3 space-y-1.5">
+                  {uploadSteps.map((s, i) => (
+                    <div
+                      key={i}
+                      className={cn(
+                        "flex items-center gap-2 text-xs transition-opacity",
+                        i === uploadSteps.length - 1 && uploadPhase !== "done"
+                          ? "text-primary font-medium"
+                          : "text-muted-foreground opacity-60"
+                      )}
+                    >
+                      {i < uploadSteps.length - 1 || uploadPhase === "done" ? (
+                        <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
+                      ) : (
+                        <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                      )}
+                      {s}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Paste panel */}
             {pasteOpen && (
               <div className="animate-in slide-in-from-bottom-2 fade-in bg-card border border-amber-200 rounded-2xl overflow-hidden shadow-md">
@@ -848,11 +994,26 @@ export default function Workspace() {
 
             {/* Textarea + send */}
             <div className="relative flex items-end bg-card border rounded-2xl p-2 shadow-sm focus-within:ring-1 focus-within:ring-primary/30 transition-shadow">
+              {/* Upload .txt */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isStreaming || uploadPhase !== "idle"}
+                className="self-end mb-1.5 ml-1 h-9 w-9 rounded-full flex items-center justify-center transition-colors shrink-0 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                title="Importer un export WhatsApp (.txt)"
+              >
+                {uploadPhase !== "idle" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <UploadCloud className="h-4 w-4" />
+                )}
+              </button>
+
+              {/* Paste toggle */}
               <button
                 onClick={() => setPasteOpen((o) => !o)}
                 disabled={isStreaming || !activeSessionId}
                 className={cn(
-                  "self-end mb-1.5 ml-1 mr-1 h-9 w-9 rounded-full flex items-center justify-center transition-colors shrink-0",
+                  "self-end mb-1.5 mr-1 h-9 w-9 rounded-full flex items-center justify-center transition-colors shrink-0",
                   pasteOpen || pastedConversation
                     ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
