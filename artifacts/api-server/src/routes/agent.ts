@@ -99,11 +99,17 @@ router.post("/relations/:relationId/agent/sessions/:sessionId/chat", async (req,
     const [mem] = await db.select().from(relationalMemoryTable)
       .where(eq(relationalMemoryTable.relationId, relationId)).limit(1);
 
-    // Recent messages (last 30)
+    // Count total messages to give agent full picture
+    const [msgCount] = await db
+      .select({ total: sql<number>`count(*)` })
+      .from(whatsappMessagesTable)
+      .where(eq(whatsappMessagesTable.relationId, relationId));
+
+    // Recent messages (last 80 for richer context)
     const recentMessages = await db.select().from(whatsappMessagesTable)
       .where(eq(whatsappMessagesTable.relationId, relationId))
       .orderBy(desc(whatsappMessagesTable.sentAt))
-      .limit(30);
+      .limit(80);
 
     recentMessages.reverse();
 
@@ -124,19 +130,23 @@ router.post("/relations/:relationId/agent/sessions/:sessionId/chat", async (req,
     const pd = report?.powerDynamics as Record<string, unknown> | undefined;
 
     // Build system prompt
-    let systemPrompt = `Tu es ReLink AI, un copilote stratégique expert en dynamiques relationnelles et rapports de force dans les relations amoureuses.
-Tu connais parfaitement la relation entre ${relation.participantMe} (TON UTILISATEUR) et ${relation.participantOther}.
-Ta mission principale : aider ${relation.participantMe} à comprendre et RÉÉQUILIBRER le rapport de force dans cette relation.
+    const totalMessages = Number(msgCount?.total ?? 0);
+    let systemPrompt = `Tu es ReLink AI, un copilote stratégique expert en dynamiques relationnelles et rapports de force.
+
+TU PARLES DIRECTEMENT AVEC : ${relation.participantMe}
+C'est ${relation.participantMe} qui t'écrit. Quand tu dis "vous" ou "tu", tu t'adresses à ${relation.participantMe}.
+L'autre personne dans la relation est : ${relation.participantOther} — tu n'as pas accès à elle, tu l'analyses à travers les messages.
+
+TA MISSION : aider ${relation.participantMe} à comprendre et rééquilibrer le rapport de force avec ${relation.participantOther}.
 
 PRINCIPES FONDAMENTAUX:
-- Tu analyses chaque situation avec lucidité et sans complaisance. Tu dis la vérité même si elle est inconfortable.
-- Tu donnes des conseils CONCRETS et ACTIONNABLES, pas des généralités. Si on te montre un message, tu proposes une réponse précise avec l'explication stratégique derrière.
+- Tu as lu et analysé TOUTE la conversation (${totalMessages} messages au total). Tu connais les patterns, les tensions, l'histoire.
+- Tu analyses avec lucidité et sans complaisance. Tu dis la vérité même inconfortable.
+- Tu donnes des conseils CONCRETS et ACTIONNABLES. Si on te montre un message, tu proposes une réponse précise avec l'intention stratégique.
 - Tu distingues toujours les faits observables des hypothèses.
-- Tu ne promets jamais le retour d'un ex ni le contrôle d'une autre personne — mais tu peux aider l'utilisateur à reprendre le contrôle de SES propres comportements et à modifier la dynamique en conséquence.
+- Tu ne promets jamais le retour d'un ex ni le contrôle d'une autre personne — mais tu aides ${relation.participantMe} à reprendre le contrôle de SES comportements.
 - Tu réponds en français, avec empathie mais surtout avec clarté stratégique.
-
-RELATION: ${relation.name}
-${relation.participantMe} (TON UTILISATEUR) — ${relation.participantOther} (L'AUTRE PERSONNE)`;
+- Quand tu cites un message, précise qui l'a écrit : "${relation.participantMe}" ou "${relation.participantOther}".`;
 
     if (mem?.globalSummary) {
       systemPrompt += `\n\n━━━ CONTEXTE DE LA RELATION ━━━\n${mem.globalSummary}`;
@@ -212,12 +222,18 @@ ${relation.participantMe} (TON UTILISATEUR) — ${relation.participantOther} (L'
     }
 
     if (recentMessages.length) {
-      const transcript = recentMessages
-        .slice(-20)
+      const shown = recentMessages.slice(-60);
+      const skipped = recentMessages.length - shown.length;
+      const transcript = shown
         .map(m => `[${m.sentAt.toISOString().split("T")[0]}] ${m.isMe ? relation.participantMe : relation.participantOther}: ${m.content}`)
         .join("\n");
-      systemPrompt += `\n\n━━━ DERNIERS MESSAGES ━━━\n${transcript}`;
-      contextUsed.push("derniers messages");
+      const header = skipped > 0
+        ? `(${skipped} messages plus anciens non affichés ici — résumé dans la mémoire relationnelle)`
+        : `(${shown.length} derniers messages sur ${totalMessages} au total)`;
+      systemPrompt += `\n\n━━━ MESSAGES DE LA CONVERSATION ━━━\n${header}\n${transcript}`;
+      contextUsed.push("messages conversation");
+    } else if (!mem) {
+      systemPrompt += `\n\n[Aucun message importé pour l'instant. Invite ${relation.participantMe} à importer la conversation ou à coller du texte directement.]`;
     }
 
     if (selectedContext) {

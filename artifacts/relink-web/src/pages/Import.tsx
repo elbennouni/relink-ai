@@ -57,27 +57,72 @@ export default function ImportFlow() {
 
   const startMemoryBuild = async () => {
     setStep('processing');
-    setProgressMessages([
-      "Lecture des messages...",
-      "Détection de la dynamique...",
-      "Chiffrement en cours..."
-    ]);
-    
-    // Animate some fake steps before hitting the real endpoint
-    await new Promise(r => setTimeout(r, 1500));
-    setProgressMessages(prev => [...prev, "Construction de la mémoire relationnelle..."]);
-    
+    setProgressMessages(["Lancement de l'analyse..."]);
+
+    const STEP_LABELS: Record<string, string> = {
+      reading:    "Lecture de la conversation...",
+      detecting:  "Détection des messages...",
+      encrypting: "Chiffrement sécurisé...",
+      building:   "Construction de la mémoire relationnelle et analyse des dynamiques de pouvoir...",
+      saving:     "Enregistrement...",
+      done:       "Analyse complète ✓",
+    };
+
     try {
-      // In a real app we'd consume the SSE stream here
-      // For now we'll just trigger the mutation and pretend it's fast
-      await buildMemory.mutateAsync({ relationId });
-      
-      setProgressMessages(prev => [...prev, "Mémoire prête !"]);
-      setTimeout(() => setStep('success'), 800);
+      const res = await fetch(`/api/relations/${relationId}/memory/build`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          for (const line of part.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const event = JSON.parse(line.slice(6));
+              if (event.error) throw new Error(event.error);
+              if (event.step) {
+                const label = STEP_LABELS[event.step] ?? event.label ?? event.step;
+                setProgressMessages(prev => {
+                  // avoid duplicates
+                  if (prev[prev.length - 1] === label) return prev;
+                  return [...prev, label];
+                });
+              }
+              if (event.step === "done") {
+                setTimeout(() => setStep('success'), 600);
+                return;
+              }
+            } catch (parseErr) {
+              if (parseErr instanceof Error && parseErr.message !== "Unexpected end of JSON input") {
+                throw parseErr;
+              }
+            }
+          }
+        }
+      }
+
+      // Stream ended without a done event — still succeed
+      setProgressMessages(prev => [...prev, "Analyse complète ✓"]);
+      setTimeout(() => setStep('success'), 600);
     } catch (e) {
+      console.error("Memory build error:", e);
       toast({
         title: "Erreur lors de l'analyse",
-        description: "Nous n'avons pas pu construire la mémoire relationnelle.",
+        description: e instanceof Error ? e.message : "Nous n'avons pas pu construire la mémoire relationnelle.",
         variant: "destructive"
       });
       setStep('upload');
