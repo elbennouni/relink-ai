@@ -4,7 +4,6 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
   useGetRelation,
-  useListMessages,
   useListAgentSessions,
   useGetAgentSession,
   useCreateAgentSession,
@@ -18,12 +17,15 @@ import {
   Loader2,
   Paperclip,
   X,
+  ChevronUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type LocalMessage = {
   id: string;
@@ -32,10 +34,41 @@ type LocalMessage = {
   isStreaming?: boolean;
 };
 
-function parseSSELine(line: string): { content?: string; done?: boolean; error?: string; contextUsed?: string[] } {
+type WaMessage = {
+  id: number;
+  relationId: number;
+  sender: string;
+  content: string;
+  isMe: boolean;
+  sentAt: string;
+  importSource?: string;
+};
+
+// ─── SSE parser ──────────────────────────────────────────────────────────────
+
+function parseSSELine(line: string): {
+  content?: string;
+  done?: boolean;
+  error?: string;
+  contextUsed?: string[];
+} {
   if (!line.startsWith("data: ")) return {};
-  try { return JSON.parse(line.slice(6)); } catch { return {}; }
+  try {
+    return JSON.parse(line.slice(6));
+  } catch {
+    return {};
+  }
 }
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
+const QUICK_CHIPS = [
+  "Schémas répétitifs ?",
+  "Ai-je été trop agressif ?",
+  "Comment poser mes limites ?",
+  "Que veut dire ce message ?",
+  "Propose une réponse",
+];
 
 export default function Workspace() {
   const params = useParams();
@@ -46,22 +79,32 @@ export default function Workspace() {
   const [activeMessageId, setActiveMessageId] = useState<number | null>(null);
   const [mobileTab, setMobileTab] = useState<"chat" | "agent">("chat");
 
-  // Chat state
+  // ── Agent chat state ───────────────────────────────────────────────────────
   const [chatInput, setChatInput] = useState("");
   const [localMessages, setLocalMessages] = useState<LocalMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [contextLabel, setContextLabel] = useState("Contexte actif");
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pastedConversation, setPastedConversation] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [introTriggered, setIntroTriggered] = useState(false);
 
-  // Data
+  const agentScrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Measures the input area to set dynamic bottom padding on the agent scroll area
+  const inputAreaRef = useRef<HTMLDivElement>(null);
+  const [inputAreaHeight, setInputAreaHeight] = useState(160);
+
+  // ── WhatsApp messages state (infinite scroll) ──────────────────────────────
+  const [waMessages, setWaMessages] = useState<WaMessage[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [totalMessages, setTotalMessages] = useState(0);
+  const [waLoading, setWaLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+  const waScrollRef = useRef<HTMLDivElement>(null);
+
+  // ── API data ───────────────────────────────────────────────────────────────
   const { data: relation } = useGetRelation(relationId, { query: { enabled: !!relationId } });
-  const { data: messagesData, isLoading: messagesLoading } = useListMessages(
-    relationId,
-    { query: { enabled: !!relationId } }
-  );
   const { data: sessions } = useListAgentSessions(relationId, { query: { enabled: !!relationId } });
   const activeSessionId = sessions?.[0]?.id;
   const { data: sessionData } = useGetAgentSession(
@@ -71,20 +114,88 @@ export default function Workspace() {
   );
   const createSession = useCreateAgentSession();
 
-  // Create session if none
+  // ── Create session if none ─────────────────────────────────────────────────
   useEffect(() => {
     if (sessions && sessions.length === 0 && !createSession.isPending) {
       createSession.mutate({ relationId, data: { title: "Nouvelle analyse" } });
     }
   }, [sessions]);
 
-  const [introTriggered, setIntroTriggered] = useState(false);
+  // ── Load initial WhatsApp messages ─────────────────────────────────────────
+  useEffect(() => {
+    if (!relationId) return;
+    setWaLoading(true);
+    fetch(`/api/relations/${relationId}/messages?limit=60`)
+      .then((r) => r.json())
+      .then((data) => {
+        setWaMessages(data.messages ?? []);
+        setNextCursor(data.nextCursor ?? null);
+        setTotalMessages(data.total ?? 0);
+      })
+      .catch(() => {})
+      .finally(() => setWaLoading(false));
+  }, [relationId]);
 
-  // Seed local messages from session data on first load
+  // ── Load more (older) messages when sentinel becomes visible ───────────────
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || isLoadingMore || !relationId) return;
+
+    const container = waScrollRef.current;
+    const prevScrollHeight = container?.scrollHeight ?? 0;
+
+    setIsLoadingMore(true);
+    try {
+      const data = await fetch(
+        `/api/relations/${relationId}/messages?cursor=${encodeURIComponent(nextCursor)}&limit=60`
+      ).then((r) => r.json());
+
+      setWaMessages((prev) => [...(data.messages ?? []), ...prev]);
+      setNextCursor(data.nextCursor ?? null);
+
+      // Restore scroll position so newly prepended messages don't jump the view
+      requestAnimationFrame(() => {
+        if (container) {
+          container.scrollTop = container.scrollHeight - prevScrollHeight;
+        }
+      });
+    } catch {
+      // silent
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [nextCursor, isLoadingMore, relationId]);
+
+  // ── IntersectionObserver for top sentinel ──────────────────────────────────
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && nextCursor && !isLoadingMore) {
+          loadMore();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMore, nextCursor, isLoadingMore]);
+
+  // ── ResizeObserver — keep bottom padding in sync with input area ────────────
+  useEffect(() => {
+    const el = inputAreaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      setInputAreaHeight(entries[0].contentRect.height + 24); // +24 gradient bleed
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // ── Auto-intro for empty sessions ──────────────────────────────────────────
   useEffect(() => {
     if (sessionData?.messages && localMessages.length === 0) {
       if (sessionData.messages.length > 0) {
-        // Session already has messages — restore them
         setLocalMessages(
           sessionData.messages.map((m) => ({
             id: String(m.id),
@@ -93,7 +204,6 @@ export default function Workspace() {
           }))
         );
       } else if (!introTriggered) {
-        // New empty session — auto-generate intro
         triggerIntro(sessionData.id as number);
       }
     }
@@ -104,18 +214,15 @@ export default function Workspace() {
     const assistantId = `intro-${Date.now()}`;
     setLocalMessages([{ id: assistantId, role: "assistant", content: "", isStreaming: true }]);
     setIsStreaming(true);
-
     try {
       const res = await fetch(
         `/api/relations/${relationId}/agent/sessions/${sessionId}/intro`,
         { method: "POST", headers: { "Content-Type": "application/json" } }
       );
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -128,12 +235,14 @@ export default function Workspace() {
             if (parsed.contextUsed?.length) setContextLabel(parsed.contextUsed.join(" · "));
             if (parsed.content) {
               setLocalMessages((prev) =>
-                prev.map((m) => m.id === assistantId ? { ...m, content: m.content + parsed.content } : m)
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: m.content + parsed.content } : m
+                )
               );
             }
             if (parsed.done) {
               setLocalMessages((prev) =>
-                prev.map((m) => m.id === assistantId ? { ...m, isStreaming: false } : m)
+                prev.map((m) => (m.id === assistantId ? { ...m, isStreaming: false } : m))
               );
             }
           }
@@ -141,124 +250,122 @@ export default function Workspace() {
       }
     } catch {
       setLocalMessages((prev) =>
-        prev.map((m) => m.id === assistantId ? { ...m, content: "Je suis prêt à analyser votre relation. Posez-moi une question.", isStreaming: false } : m)
+        prev.map((m) =>
+          m.id === assistantId
+            ? { ...m, content: "Je suis prêt à analyser votre relation. Posez-moi une question.", isStreaming: false }
+            : m
+        )
       );
     } finally {
       setIsStreaming(false);
     }
   };
 
-  // Auto-scroll on new content
+  // ── Auto-scroll agent chat on new content ──────────────────────────────────
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (agentScrollRef.current) {
+      agentScrollRef.current.scrollTop = agentScrollRef.current.scrollHeight;
     }
   }, [localMessages]);
 
-  const sendMessage = useCallback(async (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed || isStreaming || !activeSessionId) return;
+  // ── Send message ───────────────────────────────────────────────────────────
+  const sendMessage = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || isStreaming || !activeSessionId) return;
 
-    setChatInput("");
-    const pasteCopy = pastedConversation.trim();
-    if (pasteCopy) {
-      setPastedConversation("");
-      setPasteOpen(false);
-    }
-
-    const userId = `u-${Date.now()}`;
-    const assistantId = `a-${Date.now()}`;
-
-    // Show pasted context inline in user bubble if any
-    const displayContent = pasteCopy
-      ? `${trimmed}\n\n[Conversation collée — ${pasteCopy.split("\n").length} lignes]`
-      : trimmed;
-
-    setLocalMessages((prev) => [
-      ...prev,
-      { id: userId, role: "user", content: displayContent },
-      { id: assistantId, role: "assistant", content: "", isStreaming: true },
-    ]);
-    setIsStreaming(true);
-
-    try {
-      const res = await fetch(
-        `/api/relations/${relationId}/agent/sessions/${activeSessionId}/chat`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: trimmed,
-            selectedMessageIds: activeMessageId ? [activeMessageId] : undefined,
-            pastedConversation: pasteCopy || undefined,
-          }),
-        }
-      );
-
-      if (!res.ok || !res.body) {
-        throw new Error(`HTTP ${res.status}`);
+      setChatInput("");
+      const pasteCopy = pastedConversation.trim();
+      if (pasteCopy) {
+        setPastedConversation("");
+        setPasteOpen(false);
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      const userId = `u-${Date.now()}`;
+      const assistantId = `a-${Date.now()}`;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+      const displayContent = pasteCopy
+        ? `${trimmed}\n\n[Conversation collée — ${pasteCopy.split("\n").length} lignes]`
+        : trimmed;
 
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
+      setLocalMessages((prev) => [
+        ...prev,
+        { id: userId, role: "user", content: displayContent },
+        { id: assistantId, role: "assistant", content: "", isStreaming: true },
+      ]);
+      setIsStreaming(true);
 
-        for (const part of parts) {
-          for (const line of part.split("\n")) {
-            const parsed = parseSSELine(line);
-            if (parsed.contextUsed?.length) {
-              setContextLabel(parsed.contextUsed.join(" · "));
-            }
-            if (parsed.content) {
-              setLocalMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? { ...m, content: m.content + parsed.content }
-                    : m
-                )
-              );
-            }
-            if (parsed.done) {
-              setLocalMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, isStreaming: false } : m
-                )
-              );
-            }
-            if (parsed.error) {
-              setLocalMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? { ...m, content: parsed.error!, isStreaming: false }
-                    : m
-                )
-              );
+      try {
+        const res = await fetch(
+          `/api/relations/${relationId}/agent/sessions/${activeSessionId}/chat`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: trimmed,
+              selectedMessageIds: activeMessageId ? [activeMessageId] : undefined,
+              pastedConversation: pasteCopy || undefined,
+            }),
+          }
+        );
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            for (const line of part.split("\n")) {
+              const parsed = parseSSELine(line);
+              if (parsed.contextUsed?.length) setContextLabel(parsed.contextUsed.join(" · "));
+              if (parsed.content) {
+                setLocalMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId ? { ...m, content: m.content + parsed.content } : m
+                  )
+                );
+              }
+              if (parsed.done) {
+                setLocalMessages((prev) =>
+                  prev.map((m) => (m.id === assistantId ? { ...m, isStreaming: false } : m))
+                );
+              }
+              if (parsed.error) {
+                setLocalMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId ? { ...m, content: parsed.error!, isStreaming: false } : m
+                  )
+                );
+              }
             }
           }
         }
+      } catch {
+        toast({
+          title: "Erreur de connexion",
+          description: "Impossible de joindre l'agent.",
+          variant: "destructive",
+        });
+        setLocalMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: "Une erreur est survenue. Réessayez.", isStreaming: false }
+              : m
+          )
+        );
+      } finally {
+        setIsStreaming(false);
+        setActiveMessageId(null);
       }
-    } catch {
-      toast({ title: "Erreur de connexion", description: "Impossible de joindre l'agent.", variant: "destructive" });
-      setLocalMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? { ...m, content: "Une erreur est survenue. Réessayez.", isStreaming: false }
-            : m
-        )
-      );
-    } finally {
-      setIsStreaming(false);
-      setActiveMessageId(null);
-    }
-  }, [isStreaming, activeSessionId, relationId, activeMessageId, pastedConversation, toast]);
+    },
+    [isStreaming, activeSessionId, relationId, activeMessageId, pastedConversation, toast]
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -267,53 +374,62 @@ export default function Workspace() {
     }
   };
 
-  const QUICK_CHIPS = [
-    "Schémas répétitifs ?",
-    "Ai-je été trop agressif ?",
-    "Comment poser mes limites ?",
-    "Que veut dire ce message ?",
-    "Propose une réponse",
-  ];
+  if (!relation)
+    return (
+      <div className="p-12 flex justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
 
-  if (!relation) return (
-    <div className="p-12 flex justify-center">
-      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-    </div>
-  );
-
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-full w-full bg-background overflow-hidden relative">
       {/* Mobile Tabs */}
       <div className="md:hidden absolute top-0 left-0 right-0 z-10 bg-background/80 backdrop-blur-md border-b flex px-4">
         <button
           onClick={() => setMobileTab("chat")}
-          className={cn("flex-1 py-3 text-sm font-medium border-b-2 transition-colors",
-            mobileTab === "chat" ? "border-primary text-primary" : "border-transparent text-muted-foreground")}
+          className={cn(
+            "flex-1 py-3 text-sm font-medium border-b-2 transition-colors",
+            mobileTab === "chat"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground"
+          )}
         >
           Conversation
         </button>
         <button
           onClick={() => setMobileTab("agent")}
-          className={cn("flex-1 py-3 text-sm font-medium border-b-2 transition-colors",
-            mobileTab === "agent" ? "border-primary text-primary" : "border-transparent text-muted-foreground")}
+          className={cn(
+            "flex-1 py-3 text-sm font-medium border-b-2 transition-colors",
+            mobileTab === "agent"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground"
+          )}
         >
           Agent ReLink
         </button>
       </div>
 
-      {/* Left — WhatsApp viewer */}
-      <div className={cn(
-        "flex-1 md:flex-[1.2] lg:flex-1 flex-col border-r bg-card/30 h-full",
-        mobileTab === "chat" ? "flex" : "hidden md:flex"
-      )}>
-        <div className="h-16 mt-10 md:mt-0 px-4 flex items-center justify-between border-b bg-background/50 backdrop-blur-sm sticky top-0 z-10">
+      {/* ── Left — WhatsApp viewer ─────────────────────────────────────────── */}
+      <div
+        className={cn(
+          "flex-1 md:flex-[1.2] lg:flex-1 flex-col border-r bg-card/30 h-full",
+          mobileTab === "chat" ? "flex" : "hidden md:flex"
+        )}
+      >
+        {/* Header */}
+        <div className="h-16 mt-10 md:mt-0 px-4 flex items-center justify-between border-b bg-background/50 backdrop-blur-sm sticky top-0 z-10 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center font-medium text-muted-foreground">
               {relation.participantOther.charAt(0).toUpperCase()}
             </div>
             <div>
               <div className="font-medium">{relation.participantOther}</div>
-              <div className="text-xs text-muted-foreground">{messagesData?.total ?? 0} messages</div>
+              <div className="text-xs text-muted-foreground">
+                {totalMessages > 0
+                  ? `${waMessages.length} / ${totalMessages.toLocaleString("fr-FR")} messages`
+                  : "0 messages"}
+              </div>
             </div>
           </div>
           <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground">
@@ -321,13 +437,35 @@ export default function Workspace() {
           </Button>
         </div>
 
-        <ScrollArea className="flex-1 p-4">
-          <div className="space-y-4 max-w-2xl mx-auto pb-8 pt-4">
-            {messagesLoading ? (
+        {/* Messages — scrollable, with infinite scroll at the top */}
+        <div ref={waScrollRef} className="flex-1 overflow-y-auto min-h-0">
+          <div className="space-y-4 max-w-2xl mx-auto pb-8 pt-4 px-4">
+            {/* Top sentinel — triggers load of older messages */}
+            <div ref={topSentinelRef} className="h-1" />
+
+            {/* Loading more indicator */}
+            {isLoadingMore && (
+              <div className="flex justify-center py-2">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {/* Load-more button shown when cursor exists but sentinel might not trigger */}
+            {nextCursor && !isLoadingMore && (
+              <button
+                onClick={loadMore}
+                className="w-full flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ChevronUp className="h-3 w-3" />
+                Charger les messages précédents
+              </button>
+            )}
+
+            {waLoading ? (
               <div className="flex justify-center p-4">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
-            ) : messagesData?.messages?.length === 0 ? (
+            ) : waMessages.length === 0 ? (
               <div className="text-center p-12 text-muted-foreground space-y-4">
                 <MessageSquarePlus className="h-8 w-8 mx-auto opacity-50" />
                 <p>Aucun message. Importez une conversation pour commencer.</p>
@@ -340,11 +478,10 @@ export default function Workspace() {
                 </Button>
               </div>
             ) : (
-              messagesData?.messages.map((msg, i) => {
+              waMessages.map((msg, i) => {
                 const showDate =
                   i === 0 ||
-                  new Date(msg.sentAt).getDate() !==
-                    new Date(messagesData.messages[i - 1].sentAt).getDate();
+                  new Date(msg.sentAt).getDate() !== new Date(waMessages[i - 1].sentAt).getDate();
                 const isSelected = activeMessageId === msg.id;
 
                 return (
@@ -371,13 +508,17 @@ export default function Workspace() {
                         )}
                       >
                         {!msg.isMe && (
-                          <div className="text-[11px] font-semibold text-amber-600 mb-1">{msg.sender}</div>
+                          <div className="text-[11px] font-semibold text-amber-600 mb-1">
+                            {msg.sender}
+                          </div>
                         )}
                         {msg.content}
-                        <div className={cn(
-                          "text-[10px] mt-1.5 text-right",
-                          msg.isMe ? "text-primary-foreground/60" : "text-muted-foreground"
-                        )}>
+                        <div
+                          className={cn(
+                            "text-[10px] mt-1.5 text-right",
+                            msg.isMe ? "text-primary-foreground/60" : "text-muted-foreground"
+                          )}
+                        >
                           {format(new Date(msg.sentAt), "HH:mm")}
                         </div>
                       </div>
@@ -387,14 +528,17 @@ export default function Workspace() {
               })
             )}
           </div>
-        </ScrollArea>
+        </div>
       </div>
 
-      {/* Right — Agent */}
-      <div className={cn(
-        "flex-1 flex-col h-full bg-background relative",
-        mobileTab === "agent" ? "flex" : "hidden md:flex"
-      )}>
+      {/* ── Right — Agent ──────────────────────────────────────────────────── */}
+      <div
+        className={cn(
+          "flex-1 flex-col h-full bg-background relative",
+          mobileTab === "agent" ? "flex" : "hidden md:flex"
+        )}
+      >
+        {/* Header */}
         <div className="h-16 mt-10 md:mt-0 px-6 flex items-center justify-between border-b shrink-0">
           <div className="flex items-center gap-3 text-primary">
             <Bot className="h-5 w-5" />
@@ -405,47 +549,52 @@ export default function Workspace() {
           </span>
         </div>
 
-        {/* Messages */}
+        {/* Messages — bottom padding auto-sized from input area height */}
         <div className="relative flex-1 min-h-0">
-          {/* Top fade — évite que les messages accrochent visuellement au header */}
           <div className="pointer-events-none absolute top-0 left-0 right-0 h-8 z-10 bg-gradient-to-b from-background to-transparent" />
-        <div ref={scrollRef} className="h-full overflow-y-auto p-4 md:p-6 space-y-6 pb-48 pt-6">
-          <AgentBubble content="Je suis là pour analyser ces échanges avec vous. Sélectionnez un message ou posez une question générale." />
+          <div
+            ref={agentScrollRef}
+            className="h-full overflow-y-auto p-4 md:p-6 space-y-6 pt-6"
+            style={{ paddingBottom: inputAreaHeight }}
+          >
+            <AgentBubble content="Je suis là pour analyser ces échanges avec vous. Sélectionnez un message ou posez une question générale." />
 
-          {localMessages.map((msg) =>
-            msg.role === "assistant" ? (
-              <AgentBubble key={msg.id} content={msg.content} isStreaming={msg.isStreaming} />
-            ) : (
-              <UserBubble key={msg.id} content={msg.content} />
-            )
-          )}
+            {localMessages.map((msg) =>
+              msg.role === "assistant" ? (
+                <AgentBubble key={msg.id} content={msg.content} isStreaming={msg.isStreaming} />
+              ) : (
+                <UserBubble key={msg.id} content={msg.content} />
+              )
+            )}
 
-          {activeMessageId && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 bg-amber-50 border border-amber-200 rounded-2xl p-4">
-              <div className="flex items-center gap-2 text-amber-700 mb-3 text-sm font-medium">
-                <Sparkles className="h-4 w-4" />
-                Message sélectionné — inclus dans le prochain envoi
+            {activeMessageId && (
+              <div className="animate-in fade-in slide-in-from-bottom-4 bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <div className="flex items-center gap-2 text-amber-700 mb-3 text-sm font-medium">
+                  <Sparkles className="h-4 w-4" />
+                  Message sélectionné — inclus dans le prochain envoi
+                </div>
+                <p className="text-sm text-muted-foreground italic mb-3 line-clamp-3">
+                  "{waMessages.find((m) => m.id === activeMessageId)?.content}"
+                </p>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setActiveMessageId(null)}
+                  className="rounded-full text-xs h-7 px-3"
+                >
+                  Désélectionner
+                </Button>
               </div>
-              <p className="text-sm text-muted-foreground italic mb-3 line-clamp-3">
-                "{messagesData?.messages?.find((m) => m.id === activeMessageId)?.content}"
-              </p>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setActiveMessageId(null)}
-                className="rounded-full text-xs h-7 px-3"
-              >
-                Désélectionner
-              </Button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-        </div>{/* end relative wrapper */}
 
-        {/* Input */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-8 pb-4 px-4 md:px-6">
+        {/* Input area — measured by ResizeObserver to set paddingBottom above */}
+        <div
+          ref={inputAreaRef}
+          className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-8 pb-4 px-4 md:px-6"
+        >
           <div className="max-w-2xl mx-auto space-y-2">
-
             {/* Paste panel */}
             {pasteOpen && (
               <div className="animate-in slide-in-from-bottom-2 fade-in bg-card border border-amber-200 rounded-2xl overflow-hidden shadow-md">
@@ -455,7 +604,10 @@ export default function Workspace() {
                     Conversation collée — l'agent lira tout ce texte
                   </span>
                   <button
-                    onClick={() => { setPasteOpen(false); setPastedConversation(""); }}
+                    onClick={() => {
+                      setPasteOpen(false);
+                      setPastedConversation("");
+                    }}
                     className="text-amber-600 hover:text-amber-900 transition-colors"
                   >
                     <X className="h-4 w-4" />
@@ -463,8 +615,10 @@ export default function Workspace() {
                 </div>
                 <Textarea
                   autoFocus
-                  placeholder={"Colle ici ta conversation WhatsApp, iMessage, SMS…\n\nEx :\n14/07/2025 18:42 - Alex : T'as vu mon message ?\nMoi : Oui désolé j'étais occupé"}
-                  className="min-h-[160px] max-h-64 resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent text-[13px] leading-relaxed font-mono p-4"
+                  placeholder={
+                    "Colle ici ta conversation WhatsApp, iMessage, SMS…\n\nEx :\n14/07/2025 18:42 - Alex : T'as vu mon message ?\nMoi : Oui désolé j'étais occupé"
+                  }
+                  className="min-h-[140px] max-h-52 resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent text-[13px] leading-relaxed font-mono p-4"
                   value={pastedConversation}
                   onChange={(e) => setPastedConversation(e.target.value)}
                 />
@@ -490,8 +644,8 @@ export default function Workspace() {
               ))}
             </div>
 
+            {/* Textarea + send */}
             <div className="relative flex items-end bg-card border rounded-2xl p-2 shadow-sm focus-within:ring-1 focus-within:ring-primary/30 transition-shadow">
-              {/* Paste toggle button */}
               <button
                 onClick={() => setPasteOpen((o) => !o)}
                 disabled={isStreaming || !activeSessionId}
@@ -508,7 +662,11 @@ export default function Workspace() {
 
               <Textarea
                 ref={textareaRef}
-                placeholder={pastedConversation ? "Ta question sur la conversation collée…" : "Pose une question à ReLink… (Entrée pour envoyer)"}
+                placeholder={
+                  pastedConversation
+                    ? "Ta question sur la conversation collée…"
+                    : "Pose une question à ReLink… (Entrée pour envoyer)"
+                }
                 className="min-h-[44px] max-h-32 resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent py-3 text-[15px] flex-1"
                 rows={1}
                 value={chatInput}
@@ -536,7 +694,15 @@ export default function Workspace() {
   );
 }
 
-function AgentBubble({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function AgentBubble({
+  content,
+  isStreaming,
+}: {
+  content: string;
+  isStreaming?: boolean;
+}) {
   return (
     <div className="flex gap-4 max-w-3xl">
       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-primary mt-1 border border-primary/20">
@@ -550,7 +716,9 @@ function AgentBubble({ content, isStreaming }: { content: string; isStreaming?: 
         <div className="text-sm font-medium text-primary">ReLink</div>
         <div className="text-[15px] leading-relaxed text-foreground/90 whitespace-pre-wrap">
           {content}
-          {isStreaming && <span className="inline-block w-[2px] h-4 bg-primary ml-0.5 animate-pulse align-middle" />}
+          {isStreaming && (
+            <span className="inline-block w-[2px] h-4 bg-primary ml-0.5 animate-pulse align-middle" />
+          )}
         </div>
       </div>
     </div>
