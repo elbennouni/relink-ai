@@ -1,0 +1,23 @@
+kind = "mobile"
+previewPath = "/relink-mobile/"
+title = "ReLink AI Mobile"
+version = "1.0.0"
+id = "artifacts/relink-mobile"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/relink-mobile/" ]
+localPort = 18765
+
+[services.development]
+run = "pnpm --filter @workspace/relink-mobile run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/relink-mobile", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/relink-mobile", "run", "serve" ]
+
+[services.env]
+PORT = "18765"
+BASE_PATH = "/relink-mobile/"
