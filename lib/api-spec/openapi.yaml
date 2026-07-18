@@ -3,20 +3,32 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: ReLink AI API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: anthropic
+    description: Anthropic AI chat operations
+  - name: relations
+    description: Relationship management
+  - name: whatsapp
+    description: WhatsApp import and messages
+  - name: memory
+    description: Relational memory
+  - name: agent
+    description: ReLink AI agent operations
+  - name: analysis
+    description: Message analysis and response suggestions
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +36,622 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── Anthropic base endpoints ───────────────────────────────────────────────
+  /anthropic/conversations:
+    get:
+      operationId: listAnthropicConversations
+      tags: [anthropic]
+      summary: List all conversations
+      responses:
+        "200":
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AnthropicConversation"
+    post:
+      operationId: createAnthropicConversation
+      tags: [anthropic]
+      summary: Create a new conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnthropicConversationInput"
+      responses:
+        "201":
+          description: Created conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnthropicConversation"
+
+  /anthropic/conversations/{id}:
+    get:
+      operationId: getAnthropicConversation
+      tags: [anthropic]
+      summary: Get conversation with messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Conversation with messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnthropicConversationWithMessages"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnthropicError"
+    delete:
+      operationId: deleteAnthropicConversation
+      tags: [anthropic]
+      summary: Delete a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnthropicError"
+
+  /anthropic/conversations/{id}/messages:
+    get:
+      operationId: listAnthropicMessages
+      tags: [anthropic]
+      summary: List messages in a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AnthropicMessage"
+    post:
+      operationId: sendAnthropicMessage
+      tags: [anthropic]
+      summary: Send a message and receive an AI response (SSE stream)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnthropicMessageInput"
+      responses:
+        "200":
+          description: SSE stream of assistant response chunks
+          content:
+            text/event-stream: {}
+
+  # ── Relations ──────────────────────────────────────────────────────────────
+  /relations:
+    get:
+      operationId: listRelations
+      tags: [relations]
+      summary: List all tracked relationships
+      responses:
+        "200":
+          description: List of relations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Relation"
+    post:
+      operationId: createRelation
+      tags: [relations]
+      summary: Create a new relationship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRelationInput"
+      responses:
+        "201":
+          description: Created relation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Relation"
+
+  /relations/{relationId}:
+    get:
+      operationId: getRelation
+      tags: [relations]
+      summary: Get a relation with stats
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Relation detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RelationDetail"
+    delete:
+      operationId: deleteRelation
+      tags: [relations]
+      summary: Delete a relation and all its data
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # ── WhatsApp Import ────────────────────────────────────────────────────────
+  /relations/{relationId}/import/whatsapp:
+    post:
+      operationId: importWhatsapp
+      tags: [whatsapp]
+      summary: Import a WhatsApp export file
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WhatsappImportInput"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+
+  /relations/{relationId}/import/paste:
+    post:
+      operationId: importPaste
+      tags: [whatsapp]
+      summary: Import messages via copy-paste
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasteImportInput"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+
+  /relations/{relationId}/import/screenshot:
+    post:
+      operationId: importScreenshot
+      tags: [whatsapp]
+      summary: Analyze screenshot via OCR
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScreenshotImportInput"
+      responses:
+        "200":
+          description: Extracted messages for validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenshotExtractResult"
+
+  /relations/{relationId}/import/screenshot/confirm:
+    post:
+      operationId: confirmScreenshotImport
+      tags: [whatsapp]
+      summary: Confirm and add screenshot messages
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScreenshotConfirmInput"
+      responses:
+        "200":
+          description: Added messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+
+  /relations/{relationId}/import/manual:
+    post:
+      operationId: importManual
+      tags: [whatsapp]
+      summary: Add a message manually
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualMessageInput"
+      responses:
+        "201":
+          description: Added message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WhatsappMessage"
+
+  # ── WhatsApp Messages ──────────────────────────────────────────────────────
+  /relations/{relationId}/messages:
+    get:
+      operationId: listMessages
+      tags: [whatsapp]
+      summary: List paginated messages
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Paginated messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedMessages"
+
+  /relations/{relationId}/messages/stats:
+    get:
+      operationId: getMessageStats
+      tags: [whatsapp]
+      summary: Get message statistics for a relation
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Message statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageStats"
+
+  # ── Relational Memory ──────────────────────────────────────────────────────
+  /relations/{relationId}/memory:
+    get:
+      operationId: getMemory
+      tags: [memory]
+      summary: Get the relational memory summary
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Relational memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RelationalMemory"
+
+  /relations/{relationId}/memory/build:
+    post:
+      operationId: buildMemory
+      tags: [memory]
+      summary: Trigger memory construction (SSE progress)
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: SSE progress stream
+          content:
+            text/event-stream: {}
+
+  /relations/{relationId}/memory/phases:
+    get:
+      operationId: getRelationPhases
+      tags: [memory]
+      summary: Get detected relationship phases
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Detected phases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RelationPhase"
+
+  /relations/{relationId}/memory/report:
+    get:
+      operationId: getDynamicReport
+      tags: [memory]
+      summary: Get the dynamic relationship report
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Dynamic report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DynamicReport"
+
+  # ── ReLink Agent ───────────────────────────────────────────────────────────
+  /relations/{relationId}/agent/sessions:
+    get:
+      operationId: listAgentSessions
+      tags: [agent]
+      summary: List agent chat sessions for a relation
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Agent sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentSession"
+    post:
+      operationId: createAgentSession
+      tags: [agent]
+      summary: Start a new agent session
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentSessionInput"
+      responses:
+        "201":
+          description: Created session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentSession"
+
+  /relations/{relationId}/agent/sessions/{sessionId}:
+    get:
+      operationId: getAgentSession
+      tags: [agent]
+      summary: Get agent session with messages
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Session with messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentSessionWithMessages"
+
+  /relations/{relationId}/agent/sessions/{sessionId}/chat:
+    post:
+      operationId: chatWithAgent
+      tags: [agent]
+      summary: Send a message to ReLink AI (SSE stream)
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentChatInput"
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream: {}
+
+  # ── Analysis ───────────────────────────────────────────────────────────────
+  /relations/{relationId}/analysis/message:
+    post:
+      operationId: analyzeMessage
+      tags: [analysis]
+      summary: Analyze a specific message
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeMessageInput"
+      responses:
+        "200":
+          description: Message analysis (SSE)
+          content:
+            text/event-stream: {}
+
+  /relations/{relationId}/analysis/suggestions:
+    post:
+      operationId: getSuggestions
+      tags: [analysis]
+      summary: Get response suggestions
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuggestionsInput"
+      responses:
+        "200":
+          description: Response suggestions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuggestionsResult"
+
+  /relations/{relationId}/analysis/suggestions/transform:
+    post:
+      operationId: transformSuggestion
+      tags: [analysis]
+      summary: Transform a response suggestion
+      parameters:
+        - name: relationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransformSuggestionInput"
+      responses:
+        "200":
+          description: Transformed suggestion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseSuggestion"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +662,593 @@ components:
       required:
         - status
 
+    # ── Anthropic ─────────────────────────────────────────────────────────────
+    AnthropicConversation:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, title, createdAt]
+
+    AnthropicMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversationId:
+          type: integer
+        role:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, conversationId, role, content, createdAt]
+
+    AnthropicConversationInput:
+      type: object
+      properties:
+        title:
+          type: string
+      required: [title]
+
+    AnthropicMessageInput:
+      type: object
+      properties:
+        content:
+          type: string
+      required: [content]
+
+    AnthropicConversationWithMessages:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnthropicMessage"
+      required: [id, title, createdAt, messages]
+
+    AnthropicError:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    # ── Relations ─────────────────────────────────────────────────────────────
+    Relation:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        participantMe:
+          type: string
+        participantOther:
+          type: string
+        status:
+          type: string
+          enum: [active, paused, resolved]
+        messageCount:
+          type: integer
+        lastMessageAt:
+          type: string
+          format: date-time
+          nullable: true
+        memoryBuiltAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, name, participantMe, participantOther, status, messageCount, createdAt]
+
+    RelationDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        participantMe:
+          type: string
+        participantOther:
+          type: string
+        status:
+          type: string
+          enum: [active, paused, resolved]
+        messageCount:
+          type: integer
+        lastMessageAt:
+          type: string
+          format: date-time
+          nullable: true
+        memoryBuiltAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        currentPhase:
+          type: string
+          nullable: true
+        summary:
+          type: string
+          nullable: true
+      required: [id, name, participantMe, participantOther, status, messageCount, createdAt]
+
+    CreateRelationInput:
+      type: object
+      properties:
+        name:
+          type: string
+        participantMe:
+          type: string
+        participantOther:
+          type: string
+      required: [name, participantMe, participantOther]
+
+    # ── WhatsApp ──────────────────────────────────────────────────────────────
+    WhatsappImportInput:
+      type: object
+      properties:
+        content:
+          type: string
+          description: Raw content of the WhatsApp export file
+        filename:
+          type: string
+      required: [content]
+
+    PasteImportInput:
+      type: object
+      properties:
+        text:
+          type: string
+        participantMe:
+          type: string
+        participantOther:
+          type: string
+      required: [text, participantMe, participantOther]
+
+    ScreenshotImportInput:
+      type: object
+      properties:
+        imageBase64:
+          type: string
+          description: Base64 encoded image
+        mimeType:
+          type: string
+          default: "image/jpeg"
+      required: [imageBase64]
+
+    ScreenshotExtractResult:
+      type: object
+      properties:
+        extractedMessages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExtractedMessage"
+        confidence:
+          type: number
+        needsReview:
+          type: boolean
+      required: [extractedMessages, confidence, needsReview]
+
+    ExtractedMessage:
+      type: object
+      properties:
+        tempId:
+          type: string
+        sender:
+          type: string
+        content:
+          type: string
+        timestamp:
+          type: string
+          nullable: true
+        isMe:
+          type: boolean
+      required: [tempId, sender, content, isMe]
+
+    ScreenshotConfirmInput:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExtractedMessage"
+        defaultDate:
+          type: string
+          format: date
+      required: [messages]
+
+    ManualMessageInput:
+      type: object
+      properties:
+        sender:
+          type: string
+        content:
+          type: string
+        isMe:
+          type: boolean
+        sentAt:
+          type: string
+          format: date-time
+      required: [sender, content, isMe, sentAt]
+
+    WhatsappMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        relationId:
+          type: integer
+        sender:
+          type: string
+        content:
+          type: string
+        isMe:
+          type: boolean
+        sentAt:
+          type: string
+          format: date-time
+        importSource:
+          type: string
+          enum: [whatsapp_file, paste, screenshot, manual]
+      required: [id, relationId, sender, content, isMe, sentAt, importSource]
+
+    ImportResult:
+      type: object
+      properties:
+        imported:
+          type: integer
+        duplicates:
+          type: integer
+        totalMessages:
+          type: integer
+        dateRange:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date
+              nullable: true
+            to:
+              type: string
+              format: date
+              nullable: true
+          required: [from, to]
+      required: [imported, duplicates, totalMessages, dateRange]
+
+    PaginatedMessages:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/WhatsappMessage"
+        nextCursor:
+          type: string
+          nullable: true
+        total:
+          type: integer
+      required: [messages, total]
+
+    MessageStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        byParticipant:
+          type: object
+          additionalProperties:
+            type: integer
+        dateRange:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date
+              nullable: true
+            to:
+              type: string
+              format: date
+              nullable: true
+          required: [from, to]
+        avgResponseTimeMinutes:
+          type: number
+          nullable: true
+        daysWithMessages:
+          type: integer
+      required: [total, byParticipant, dateRange, daysWithMessages]
+
+    # ── Memory ────────────────────────────────────────────────────────────────
+    RelationalMemory:
+      type: object
+      properties:
+        relationId:
+          type: integer
+        globalSummary:
+          type: string
+          nullable: true
+        currentPhase:
+          type: string
+          nullable: true
+        recurringTopics:
+          type: array
+          items:
+            type: string
+        expressedLimits:
+          type: array
+          items:
+            type: string
+        openQuestions:
+          type: array
+          items:
+            type: string
+        importantEvents:
+          type: array
+          items:
+            type: string
+        communicationTrends:
+          type: object
+          nullable: true
+          properties:
+            whoInitiates:
+              type: string
+              nullable: true
+            responseBalance:
+              type: string
+              nullable: true
+            overallTone:
+              type: string
+              nullable: true
+        builtAt:
+          type: string
+          format: date-time
+          nullable: true
+        isBuilding:
+          type: boolean
+      required: [relationId, recurringTopics, expressedLimits, openQuestions, importantEvents, isBuilding]
+
+    RelationPhase:
+      type: object
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        description:
+          type: string
+        startDate:
+          type: string
+          format: date
+          nullable: true
+        endDate:
+          type: string
+          format: date
+          nullable: true
+        isCurrentPhase:
+          type: boolean
+      required: [id, label, description, isCurrentPhase]
+
+    DynamicReport:
+      type: object
+      properties:
+        whoInitiates:
+          type: string
+          nullable: true
+        whoFollowsUp:
+          type: string
+          nullable: true
+        avgResponseTime:
+          type: string
+          nullable: true
+        messageFrequency:
+          type: string
+          nullable: true
+        recentChanges:
+          type: string
+          nullable: true
+        recurringConflicts:
+          type: array
+          items:
+            type: string
+        silences:
+          type: array
+          items:
+            type: string
+        expressedLimits:
+          type: array
+          items:
+            type: string
+        unansweredQuestions:
+          type: array
+          items:
+            type: string
+        observableFacts:
+          type: array
+          items:
+            type: string
+        trends:
+          type: array
+          items:
+            type: string
+        hypotheses:
+          type: array
+          items:
+            type: string
+        unknowns:
+          type: array
+          items:
+            type: string
+      required: [recurringConflicts, silences, expressedLimits, unansweredQuestions, observableFacts, trends, hypotheses, unknowns]
+
+    # ── Agent ─────────────────────────────────────────────────────────────────
+    AgentSession:
+      type: object
+      properties:
+        id:
+          type: integer
+        relationId:
+          type: integer
+        title:
+          type: string
+        messageCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, relationId, title, messageCount, createdAt, updatedAt]
+
+    AgentSessionWithMessages:
+      type: object
+      properties:
+        id:
+          type: integer
+        relationId:
+          type: integer
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentMessage"
+      required: [id, relationId, title, createdAt, messages]
+
+    AgentMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: integer
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        contextUsed:
+          type: array
+          items:
+            type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, sessionId, role, content, createdAt]
+
+    CreateAgentSessionInput:
+      type: object
+      properties:
+        title:
+          type: string
+        initialMessage:
+          type: string
+          nullable: true
+      required: [title]
+
+    AgentChatInput:
+      type: object
+      properties:
+        message:
+          type: string
+        selectedMessageIds:
+          type: array
+          items:
+            type: integer
+          nullable: true
+      required: [message]
+
+    # ── Analysis ──────────────────────────────────────────────────────────────
+    AnalyzeMessageInput:
+      type: object
+      properties:
+        messageId:
+          type: integer
+          nullable: true
+        messageContent:
+          type: string
+          nullable: true
+        additionalContext:
+          type: string
+          nullable: true
+      required: []
+
+    SuggestionsInput:
+      type: object
+      properties:
+        messageId:
+          type: integer
+          nullable: true
+        messageContent:
+          type: string
+          nullable: true
+        context:
+          type: string
+          nullable: true
+      required: []
+
+    ResponseSuggestion:
+      type: object
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        style:
+          type: string
+          enum: [natural, calm, firm]
+        intention:
+          type: string
+        tone:
+          type: string
+        explanation:
+          type: string
+      required: [id, text, style, intention, tone, explanation]
+
+    SuggestionsResult:
+      type: object
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResponseSuggestion"
+        analysis:
+          type: string
+          nullable: true
+      required: [suggestions]
+
+    TransformSuggestionInput:
+      type: object
+      properties:
+        originalText:
+          type: string
+        transformation:
+          type: string
+          enum: [shorter, more_natural, softer, firmer, no_blame, single_question, detached, dignified]
+        relationId:
+          type: integer
+      required: [originalText, transformation, relationId]

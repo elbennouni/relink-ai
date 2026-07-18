@@ -1,0 +1,2 @@
+- [ReLink AI stack](relink-stack.md) — Anthropic SSE routes must use fetch+ReadableStream, not orval hooks; api-zod is empty (export {}), use manual zod schemas in routes
+- [API server build quirks](api-server-build.md) — zod must be in api-server dependencies explicitly; health.ts must not import from api-zod; useToast lives in @/hooks/use-toast not @/components/ui/toast

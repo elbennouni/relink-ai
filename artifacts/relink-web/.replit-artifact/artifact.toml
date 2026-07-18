@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "ReLink AI"
+version = "1.0.0"
+id = "artifacts/relink-web"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23508
+
+[services.development]
+run = "pnpm --filter @workspace/relink-web run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/relink-web", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/relink-web/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23508"
+BASE_PATH = "/"
