@@ -119,18 +119,27 @@ router.post("/relations/:relationId/agent/sessions/:sessionId/chat", async (req,
       }
     }
 
+    // Extract power dynamics from stored report
+    const report = mem?.dynamicReport as Record<string, unknown> | undefined;
+    const pd = report?.powerDynamics as Record<string, unknown> | undefined;
+
     // Build system prompt
-    let systemPrompt = `Tu es ReLink AI, un copilote émotionnel expert en relations amoureuses et ruptures.
-Tu connais parfaitement la relation entre ${relation.participantMe} et ${relation.participantOther}.
-Tu réponds avec empathie, lucidité et bienveillance. Tu ne promets jamais le retour d'un ex, le contrôle d'une autre personne, ou un résultat émotionnel garanti.
-Tu distingues toujours les faits des hypothèses et des inconnues.
-Tu réponds en français.
+    let systemPrompt = `Tu es ReLink AI, un copilote stratégique expert en dynamiques relationnelles et rapports de force dans les relations amoureuses.
+Tu connais parfaitement la relation entre ${relation.participantMe} (TON UTILISATEUR) et ${relation.participantOther}.
+Ta mission principale : aider ${relation.participantMe} à comprendre et RÉÉQUILIBRER le rapport de force dans cette relation.
+
+PRINCIPES FONDAMENTAUX:
+- Tu analyses chaque situation avec lucidité et sans complaisance. Tu dis la vérité même si elle est inconfortable.
+- Tu donnes des conseils CONCRETS et ACTIONNABLES, pas des généralités. Si on te montre un message, tu proposes une réponse précise avec l'explication stratégique derrière.
+- Tu distingues toujours les faits observables des hypothèses.
+- Tu ne promets jamais le retour d'un ex ni le contrôle d'une autre personne — mais tu peux aider l'utilisateur à reprendre le contrôle de SES propres comportements et à modifier la dynamique en conséquence.
+- Tu réponds en français, avec empathie mais surtout avec clarté stratégique.
 
 RELATION: ${relation.name}
-${relation.participantMe} (moi) — ${relation.participantOther} (eux)`;
+${relation.participantMe} (TON UTILISATEUR) — ${relation.participantOther} (L'AUTRE PERSONNE)`;
 
     if (mem?.globalSummary) {
-      systemPrompt += `\n\nMÉMOIRE RELATIONNELLE:\n${mem.globalSummary}`;
+      systemPrompt += `\n\n━━━ CONTEXTE DE LA RELATION ━━━\n${mem.globalSummary}`;
       contextUsed.push("mémoire globale");
     }
 
@@ -139,11 +148,67 @@ ${relation.participantMe} (moi) — ${relation.participantOther} (eux)`;
     }
 
     if (mem?.recurringTopics?.length) {
-      systemPrompt += `\nSujets récurrents: ${mem.recurringTopics.join(", ")}`;
+      systemPrompt += `\nSujets récurrents: ${(mem.recurringTopics as string[]).join(", ")}`;
     }
 
     if (mem?.expressedLimits?.length) {
-      systemPrompt += `\nLimites exprimées: ${mem.expressedLimits.join(", ")}`;
+      systemPrompt += `\nLimites exprimées: ${(mem.expressedLimits as string[]).join(", ")}`;
+    }
+
+    // Power dynamics — the core of the agent's strategic awareness
+    if (pd) {
+      systemPrompt += `\n\n━━━ DYNAMIQUE DE POUVOIR (ANALYSE COMPLÈTE) ━━━`;
+
+      if (pd.currentDynamicSummary) {
+        systemPrompt += `\n\nSITUATION ACTUELLE:\n${pd.currentDynamicSummary}`;
+        contextUsed.push("dynamique de pouvoir");
+      }
+
+      if (typeof pd.imbalanceScore === "number") {
+        const score = pd.imbalanceScore as number;
+        const label = score < -5 ? "Fort déséquilibre — ${relation.participantOther} domine" :
+                      score < -2 ? "Déséquilibre modéré en faveur de ${relation.participantOther}" :
+                      score < 2  ? "Relation relativement équilibrée" :
+                      score < 5  ? "Légère dominance de ${relation.participantMe}" :
+                                   "Fort avantage pour ${relation.participantMe}";
+        systemPrompt += `\nScore de déséquilibre: ${score}/10 (${label})`;
+      }
+
+      if (Array.isArray(pd.dominancePatterns) && pd.dominancePatterns.length) {
+        systemPrompt += `\n\nPATTERNS DE DOMINATION OBSERVÉS:\n${(pd.dominancePatterns as string[]).map(p => `• ${p}`).join("\n")}`;
+      }
+
+      if (Array.isArray(pd.submissivePatterns) && pd.submissivePatterns.length) {
+        systemPrompt += `\n\nCOMPORTEMENTS SOUMIS DE ${relation.participantMe}:\n${(pd.submissivePatterns as string[]).map(p => `• ${p}`).join("\n")}`;
+      }
+
+      if (Array.isArray(pd.tensionPoints) && pd.tensionPoints.length) {
+        const tensions = pd.tensionPoints as Array<Record<string, string>>;
+        systemPrompt += `\n\nTENSIONS RÉCURRENTES:\n${tensions.map(t =>
+          `• Déclencheur: ${t.trigger} → ${t.pattern}`
+        ).join("\n")}`;
+      }
+
+      if (Array.isArray(pd.powerShifts) && pd.powerShifts.length) {
+        systemPrompt += `\n\nBASSCULEMENTS DE POUVOIR:\n${(pd.powerShifts as string[]).map(p => `• ${p}`).join("\n")}`;
+      }
+
+      const rs = pd.reversalStrategy as Record<string, unknown> | undefined;
+      if (rs) {
+        systemPrompt += `\n\n━━━ STRATÉGIE DE RÉÉQUILIBRAGE ━━━`;
+        if (rs.mainPrinciple) systemPrompt += `\nPrincipe clé: ${rs.mainPrinciple}`;
+        if (Array.isArray(rs.behaviorsToStop) && rs.behaviorsToStop.length) {
+          systemPrompt += `\nÀ ARRÊTER IMMÉDIATEMENT:\n${(rs.behaviorsToStop as string[]).map(b => `• ${b}`).join("\n")}`;
+        }
+        if (Array.isArray(rs.behaviorsToAdopt) && rs.behaviorsToAdopt.length) {
+          systemPrompt += `\nÀ ADOPTER:\n${(rs.behaviorsToAdopt as string[]).map(b => `• ${b}`).join("\n")}`;
+        }
+        if (Array.isArray(rs.messagingPrinciples) && rs.messagingPrinciples.length) {
+          systemPrompt += `\nPRINCIPES POUR LES MESSAGES:\n${(rs.messagingPrinciples as string[]).map(b => `• ${b}`).join("\n")}`;
+        }
+      }
+
+      systemPrompt += `\n\nTu dois garder toute cette analyse en tête dans CHAQUE réponse. Quand l'utilisateur te montre un message ou te demande quoi répondre, applique toujours ces principes stratégiques pour l'aider à rééquilibrer le rapport de force.`;
     }
 
     if (recentMessages.length) {
@@ -151,7 +216,7 @@ ${relation.participantMe} (moi) — ${relation.participantOther} (eux)`;
         .slice(-20)
         .map(m => `[${m.sentAt.toISOString().split("T")[0]}] ${m.isMe ? relation.participantMe : relation.participantOther}: ${m.content}`)
         .join("\n");
-      systemPrompt += `\n\nDERNIERS MESSAGES:\n${transcript}`;
+      systemPrompt += `\n\n━━━ DERNIERS MESSAGES ━━━\n${transcript}`;
       contextUsed.push("derniers messages");
     }
 

@@ -34,7 +34,7 @@ export default function Memory() {
           </div>
           <div>
             <h1 className="font-serif text-3xl tracking-tight">{relation.name}</h1>
-            <p className="text-muted-foreground text-sm">Mémoire relationnelle · Mise à jour {memory.builtAt ? format(new Date(memory.builtAt), "le dd MMM à HH:mm", { locale: fr }) : "récemment"}</p>
+            <p className="text-muted-foreground text-sm">Mémoire relationnelle · Mise à jour {memory.builtAt ? format(new Date(memory.builtAt), "'le' dd MMM 'à' HH:mm", { locale: fr }) : "récemment"}</p>
           </div>
         </div>
       </header>
