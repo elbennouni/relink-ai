@@ -349,7 +349,10 @@ export default function Workspace() {
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 pb-48">
+        <div className="relative flex-1 min-h-0">
+          {/* Top fade — évite que les messages accrochent visuellement au header */}
+          <div className="pointer-events-none absolute top-0 left-0 right-0 h-8 z-10 bg-gradient-to-b from-background to-transparent" />
+        <div ref={scrollRef} className="h-full overflow-y-auto p-4 md:p-6 space-y-6 pb-48 pt-6">
           <AgentBubble content="Je suis là pour analyser ces échanges avec vous. Sélectionnez un message ou posez une question générale." />
 
           {localMessages.map((msg) =>
@@ -380,6 +383,7 @@ export default function Workspace() {
             </div>
           )}
         </div>
+        </div>{/* end relative wrapper */}
 
         {/* Input */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-8 pb-4 px-4 md:px-6">
