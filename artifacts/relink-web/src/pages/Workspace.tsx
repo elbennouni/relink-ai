@@ -13,11 +13,11 @@ import {
   Bot,
   Send,
   Search,
-  ChevronLeft,
   Sparkles,
   MessageSquarePlus,
   Loader2,
-  CheckCircle2,
+  Paperclip,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -51,6 +51,8 @@ export default function Workspace() {
   const [localMessages, setLocalMessages] = useState<LocalMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [contextLabel, setContextLabel] = useState("Contexte actif");
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pastedConversation, setPastedConversation] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -101,13 +103,23 @@ export default function Workspace() {
     if (!trimmed || isStreaming || !activeSessionId) return;
 
     setChatInput("");
+    const pasteCopy = pastedConversation.trim();
+    if (pasteCopy) {
+      setPastedConversation("");
+      setPasteOpen(false);
+    }
 
     const userId = `u-${Date.now()}`;
     const assistantId = `a-${Date.now()}`;
 
+    // Show pasted context inline in user bubble if any
+    const displayContent = pasteCopy
+      ? `${trimmed}\n\n[Conversation collée — ${pasteCopy.split("\n").length} lignes]`
+      : trimmed;
+
     setLocalMessages((prev) => [
       ...prev,
-      { id: userId, role: "user", content: trimmed },
+      { id: userId, role: "user", content: displayContent },
       { id: assistantId, role: "assistant", content: "", isStreaming: true },
     ]);
     setIsStreaming(true);
@@ -121,6 +133,7 @@ export default function Workspace() {
           body: JSON.stringify({
             message: trimmed,
             selectedMessageIds: activeMessageId ? [activeMessageId] : undefined,
+            pastedConversation: pasteCopy || undefined,
           }),
         }
       );
@@ -188,7 +201,7 @@ export default function Workspace() {
       setIsStreaming(false);
       setActiveMessageId(null);
     }
-  }, [isStreaming, activeSessionId, relationId, activeMessageId, toast]);
+  }, [isStreaming, activeSessionId, relationId, activeMessageId, pastedConversation, toast]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -371,6 +384,37 @@ export default function Workspace() {
         {/* Input */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-8 pb-4 px-4 md:px-6">
           <div className="max-w-2xl mx-auto space-y-2">
+
+            {/* Paste panel */}
+            {pasteOpen && (
+              <div className="animate-in slide-in-from-bottom-2 fade-in bg-card border border-amber-200 rounded-2xl overflow-hidden shadow-md">
+                <div className="flex items-center justify-between px-4 py-2 border-b border-amber-100 bg-amber-50/60">
+                  <span className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                    <Paperclip className="h-3.5 w-3.5" />
+                    Conversation collée — l'agent lira tout ce texte
+                  </span>
+                  <button
+                    onClick={() => { setPasteOpen(false); setPastedConversation(""); }}
+                    className="text-amber-600 hover:text-amber-900 transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <Textarea
+                  autoFocus
+                  placeholder={"Colle ici ta conversation WhatsApp, iMessage, SMS…\n\nEx :\n14/07/2025 18:42 - Alex : T'as vu mon message ?\nMoi : Oui désolé j'étais occupé"}
+                  className="min-h-[160px] max-h-64 resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent text-[13px] leading-relaxed font-mono p-4"
+                  value={pastedConversation}
+                  onChange={(e) => setPastedConversation(e.target.value)}
+                />
+                {pastedConversation.trim() && (
+                  <div className="px-4 py-2 border-t border-amber-100 text-[11px] text-amber-700">
+                    {pastedConversation.trim().split("\n").filter(Boolean).length} lignes prêtes · pose ta question ci-dessous puis envoie
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Quick chips */}
             <div className="flex overflow-x-auto gap-2 pb-1 scrollbar-none">
               {QUICK_CHIPS.map((chip) => (
@@ -386,9 +430,24 @@ export default function Workspace() {
             </div>
 
             <div className="relative flex items-end bg-card border rounded-2xl p-2 shadow-sm focus-within:ring-1 focus-within:ring-primary/30 transition-shadow">
+              {/* Paste toggle button */}
+              <button
+                onClick={() => setPasteOpen((o) => !o)}
+                disabled={isStreaming || !activeSessionId}
+                className={cn(
+                  "self-end mb-1.5 ml-1 mr-1 h-9 w-9 rounded-full flex items-center justify-center transition-colors shrink-0",
+                  pasteOpen || pastedConversation
+                    ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+                title="Coller une conversation"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
+
               <Textarea
                 ref={textareaRef}
-                placeholder="Posez une question à ReLink… (Entrée pour envoyer)"
+                placeholder={pastedConversation ? "Ta question sur la conversation collée…" : "Pose une question à ReLink… (Entrée pour envoyer)"}
                 className="min-h-[44px] max-h-32 resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent py-3 text-[15px] flex-1"
                 rows={1}
                 value={chatInput}

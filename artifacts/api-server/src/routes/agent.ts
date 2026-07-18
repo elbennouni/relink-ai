@@ -79,7 +79,7 @@ router.post("/relations/:relationId/agent/sessions/:sessionId/chat", async (req,
   const sessionId = Number(req.params.sessionId);
   if (isNaN(relationId) || isNaN(sessionId)) { res.status(400).json({ error: "ID invalide" }); return; }
 
-  const { message, selectedMessageIds } = req.body;
+  const { message, selectedMessageIds, pastedConversation } = req.body;
   if (!message) { res.status(400).json({ error: "Message requis." }); return; }
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -222,6 +222,12 @@ ${relation.participantMe} (TON UTILISATEUR) — ${relation.participantOther} (L'
 
     if (selectedContext) {
       systemPrompt += selectedContext;
+    }
+
+    // Pasted raw conversation from user
+    if (pastedConversation && typeof pastedConversation === "string" && pastedConversation.trim().length > 20) {
+      systemPrompt += `\n\n━━━ CONVERSATION COLLÉE PAR L'UTILISATEUR ━━━\nL'utilisateur t'a fourni directement ce texte de conversation. Analyse-le avec précision — patterns de pouvoir, tensions, formulations — et réponds à sa question en te basant sur ce contenu.\n\n${pastedConversation.trim()}`;
+      contextUsed.push("conversation collée");
     }
 
     // Previous session messages for context
