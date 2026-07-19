@@ -22,6 +22,7 @@ import {
   UploadCloud,
   CheckCircle2,
   BrainCircuit,
+  ImagePlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -31,10 +32,18 @@ import { Textarea } from "@/components/ui/textarea";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+type PendingImage = {
+  id: string;
+  data: string;       // base64 sans le préfixe data:...
+  mediaType: string;  // image/jpeg | image/png | ...
+  previewUrl: string; // URL.createObjectURL
+};
+
 type LocalMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  images?: PendingImage[];
   isStreaming?: boolean;
 };
 
@@ -114,12 +123,40 @@ export default function Workspace() {
   const [activeMonth, setActiveMonth] = useState<string | null>(null); // "YYYY-M"
   const [monthLoading, setMonthLoading] = useState<string | null>(null);
 
-  // ── Upload state ───────────────────────────────────────────────────────────
+  // ── Upload state (WhatsApp .txt) ───────────────────────────────────────────
   type UploadPhase = "idle" | "importing" | "building" | "done";
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
   const [uploadSteps, setUploadSteps] = useState<string[]>([]);
   const [uploadImported, setUploadImported] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Image attachments state ────────────────────────────────────────────────
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImageSelect = useCallback((files: FileList | null) => {
+    if (!files) return;
+    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    Array.from(files).forEach((file) => {
+      if (!allowed.includes(file.type)) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // result = "data:<mediaType>;base64,<data>"
+        const base64 = result.split(",")[1];
+        setPendingImages((prev) => [
+          ...prev,
+          {
+            id: `img-${Date.now()}-${Math.random()}`,
+            data: base64,
+            mediaType: file.type,
+            previewUrl: URL.createObjectURL(file),
+          },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+  }, []);
 
   // ── API data ───────────────────────────────────────────────────────────────
   const { data: relation } = useGetRelation(relationId, { query: { enabled: !!relationId } });
@@ -505,7 +542,7 @@ export default function Workspace() {
   const sendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed || isStreaming || !activeSessionId) return;
+      if ((!trimmed && pendingImages.length === 0) || isStreaming || !activeSessionId) return;
 
       setChatInput("");
       const pasteCopy = pastedConversation.trim();
@@ -514,19 +551,25 @@ export default function Workspace() {
         setPasteOpen(false);
       }
 
+      // Capture & clear images
+      const imagesCopy = [...pendingImages];
+      setPendingImages([]);
+
       const userId = `u-${Date.now()}`;
       const assistantId = `a-${Date.now()}`;
 
       const displayContent = pasteCopy
         ? `${trimmed}\n\n[Conversation collée — ${pasteCopy.split("\n").length} lignes]`
-        : trimmed;
+        : trimmed || (imagesCopy.length > 0 ? "Analyse cette image." : "");
 
       setLocalMessages((prev) => [
         ...prev,
-        { id: userId, role: "user", content: displayContent },
+        { id: userId, role: "user", content: displayContent, images: imagesCopy.length ? imagesCopy : undefined },
         { id: assistantId, role: "assistant", content: "", isStreaming: true },
       ]);
       setIsStreaming(true);
+
+      const messageToSend = trimmed || "Analyse cette image et dis-moi ce que tu en penses dans le contexte de notre relation.";
 
       try {
         const res = await fetch(
@@ -535,9 +578,12 @@ export default function Workspace() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              message: trimmed,
+              message: messageToSend,
               selectedMessageIds: activeMessageId ? [activeMessageId] : undefined,
               pastedConversation: pasteCopy || undefined,
+              images: imagesCopy.length
+                ? imagesCopy.map((img) => ({ data: img.data, mediaType: img.mediaType }))
+                : undefined,
             }),
           }
         );
@@ -597,7 +643,7 @@ export default function Workspace() {
         setActiveMessageId(null);
       }
     },
-    [isStreaming, activeSessionId, relationId, activeMessageId, pastedConversation, toast]
+    [isStreaming, activeSessionId, relationId, activeMessageId, pastedConversation, pendingImages, toast]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -855,7 +901,7 @@ export default function Workspace() {
               msg.role === "assistant" ? (
                 <AgentBubble key={msg.id} content={msg.content} isStreaming={msg.isStreaming} />
               ) : (
-                <UserBubble key={msg.id} content={msg.content} />
+                <UserBubble key={msg.id} content={msg.content} images={msg.images} />
               )
             )}
 
@@ -887,7 +933,7 @@ export default function Workspace() {
           className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-8 pb-4 px-4 md:px-6"
         >
           <div className="max-w-2xl mx-auto space-y-2">
-            {/* Hidden file input */}
+            {/* Hidden file input — WhatsApp .txt */}
             <input
               ref={fileInputRef}
               type="file"
@@ -896,6 +942,19 @@ export default function Workspace() {
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) handleFileUpload(f);
+                e.target.value = "";
+              }}
+            />
+
+            {/* Hidden image input */}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                handleImageSelect(e.target.files);
                 e.target.value = "";
               }}
             />
@@ -993,62 +1052,103 @@ export default function Workspace() {
             </div>
 
             {/* Textarea + send */}
-            <div className="relative flex items-end bg-card border rounded-2xl p-2 shadow-sm focus-within:ring-1 focus-within:ring-primary/30 transition-shadow">
-              {/* Upload .txt */}
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isStreaming || uploadPhase !== "idle"}
-                className="self-end mb-1.5 ml-1 h-9 w-9 rounded-full flex items-center justify-center transition-colors shrink-0 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-                title="Importer un export WhatsApp (.txt)"
-              >
-                {uploadPhase !== "idle" ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <UploadCloud className="h-4 w-4" />
-                )}
-              </button>
+            <div className="relative flex flex-col bg-card border rounded-2xl shadow-sm focus-within:ring-1 focus-within:ring-primary/30 transition-shadow overflow-hidden">
 
-              {/* Paste toggle */}
-              <button
-                onClick={() => setPasteOpen((o) => !o)}
-                disabled={isStreaming || !activeSessionId}
-                className={cn(
-                  "self-end mb-1.5 mr-1 h-9 w-9 rounded-full flex items-center justify-center transition-colors shrink-0",
-                  pasteOpen || pastedConversation
-                    ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-                title="Coller une conversation"
-              >
-                <Paperclip className="h-4 w-4" />
-              </button>
+              {/* Image previews */}
+              {pendingImages.length > 0 && (
+                <div className="flex gap-2 px-3 pt-3 flex-wrap">
+                  {pendingImages.map((img) => (
+                    <div key={img.id} className="relative group shrink-0">
+                      <img
+                        src={img.previewUrl}
+                        alt="aperçu"
+                        className="h-16 w-16 object-cover rounded-xl border bg-muted"
+                      />
+                      <button
+                        onClick={() => setPendingImages((prev) => prev.filter((i) => i.id !== img.id))}
+                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-background border shadow flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-              <Textarea
-                ref={textareaRef}
-                placeholder={
-                  pastedConversation
-                    ? "Ta question sur la conversation collée…"
-                    : "Pose une question à ReLink… (Entrée pour envoyer)"
-                }
-                className="min-h-[44px] max-h-32 resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent py-3 text-[15px] flex-1"
-                rows={1}
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isStreaming || !activeSessionId}
-              />
-              <Button
-                size="icon"
-                className="rounded-full h-10 w-10 shrink-0 mb-1 mr-1"
-                onClick={() => sendMessage(chatInput)}
-                disabled={!chatInput.trim() || isStreaming || !activeSessionId}
-              >
-                {isStreaming ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4 ml-0.5" />
-                )}
-              </Button>
+              <div className="flex items-end p-2">
+                {/* Upload .txt */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isStreaming || uploadPhase !== "idle"}
+                  className="self-end mb-1.5 ml-1 h-9 w-9 rounded-full flex items-center justify-center transition-colors shrink-0 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                  title="Importer un export WhatsApp (.txt)"
+                >
+                  {uploadPhase !== "idle" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <UploadCloud className="h-4 w-4" />
+                  )}
+                </button>
+
+                {/* Image upload */}
+                <button
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={isStreaming || !activeSessionId}
+                  className={cn(
+                    "self-end mb-1.5 h-9 w-9 rounded-full flex items-center justify-center transition-colors shrink-0",
+                    pendingImages.length > 0
+                      ? "bg-primary/10 text-primary hover:bg-primary/20"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                  )}
+                  title="Joindre une image"
+                >
+                  <ImagePlus className="h-4 w-4" />
+                </button>
+
+                {/* Paste toggle */}
+                <button
+                  onClick={() => setPasteOpen((o) => !o)}
+                  disabled={isStreaming || !activeSessionId}
+                  className={cn(
+                    "self-end mb-1.5 mr-1 h-9 w-9 rounded-full flex items-center justify-center transition-colors shrink-0",
+                    pasteOpen || pastedConversation
+                      ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                  title="Coller une conversation"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+
+                <Textarea
+                  ref={textareaRef}
+                  placeholder={
+                    pendingImages.length > 0
+                      ? "Pose une question sur l'image… (ou envoie directement)"
+                      : pastedConversation
+                      ? "Ta question sur la conversation collée…"
+                      : "Pose une question à ReLink… (Entrée pour envoyer)"
+                  }
+                  className="min-h-[44px] max-h-32 resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent py-3 text-[15px] flex-1"
+                  rows={1}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  disabled={isStreaming || !activeSessionId}
+                />
+                <Button
+                  size="icon"
+                  className="rounded-full h-10 w-10 shrink-0 mb-1 mr-1"
+                  onClick={() => sendMessage(chatInput)}
+                  disabled={(!chatInput.trim() && pendingImages.length === 0) || isStreaming || !activeSessionId}
+                >
+                  {isStreaming ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4 ml-0.5" />
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -1088,11 +1188,27 @@ function AgentBubble({
   );
 }
 
-function UserBubble({ content }: { content: string }) {
+function UserBubble({ content, images }: { content: string; images?: PendingImage[] }) {
   return (
     <div className="flex justify-end gap-4 max-w-3xl ml-auto">
-      <div className="bg-muted px-5 py-3 rounded-2xl rounded-tr-sm text-[15px] leading-relaxed whitespace-pre-wrap">
-        {content}
+      <div className="bg-muted rounded-2xl rounded-tr-sm overflow-hidden">
+        {images && images.length > 0 && (
+          <div className={cn("flex gap-2 p-2", content.trim() && "pb-1")}>
+            {images.map((img) => (
+              <img
+                key={img.id}
+                src={img.previewUrl}
+                alt="image jointe"
+                className="h-40 max-w-[240px] object-cover rounded-xl"
+              />
+            ))}
+          </div>
+        )}
+        {content.trim() && (
+          <div className="px-5 py-3 text-[15px] leading-relaxed whitespace-pre-wrap">
+            {content}
+          </div>
+        )}
       </div>
     </div>
   );

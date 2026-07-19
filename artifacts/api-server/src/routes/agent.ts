@@ -447,8 +447,25 @@ router.post("/relations/:relationId/agent/sessions/:sessionId/chat", async (req,
   const sessionId = Number(req.params.sessionId);
   if (isNaN(relationId) || isNaN(sessionId)) { res.status(400).json({ error: "ID invalide" }); return; }
 
-  const { message, selectedMessageIds, pastedConversation } = req.body;
+  const { message, selectedMessageIds, pastedConversation, images } = req.body;
   if (!message) { res.status(400).json({ error: "Message requis." }); return; }
+
+  // images: Array<{ data: string; mediaType: string }> — base64 encoded
+  const imageBlocks: Array<{
+    type: "image";
+    source: { type: "base64"; media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp"; data: string };
+  }> = Array.isArray(images)
+    ? images
+        .filter((img: { data?: string; mediaType?: string }) => img?.data && img?.mediaType)
+        .map((img: { data: string; mediaType: string }) => ({
+          type: "image" as const,
+          source: {
+            type: "base64" as const,
+            media_type: img.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+            data: img.data,
+          },
+        }))
+    : [];
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -500,11 +517,18 @@ router.post("/relations/:relationId/agent/sessions/:sessionId/chat", async (req,
     });
 
     // Build conversation history
-    const chatHistory = prevMessages.map(m => ({
+    const chatHistory: Array<{ role: "user" | "assistant"; content: string | Array<{ type: string; [k: string]: unknown }> }> = prevMessages.map(m => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     }));
-    chatHistory.push({ role: "user", content: message });
+
+    // If images are attached, build a vision content array
+    const userContent: string | Array<{ type: string; [k: string]: unknown }> =
+      imageBlocks.length > 0
+        ? [...imageBlocks, { type: "text", text: message }]
+        : message;
+
+    chatHistory.push({ role: "user", content: userContent });
 
     send({ contextUsed });
 
