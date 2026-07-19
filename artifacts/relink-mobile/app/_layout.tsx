@@ -81,6 +81,10 @@ function RootLayoutNav() {
         name="relations/[id]"
         options={{ headerShown: false }}
       />
+      <Stack.Screen
+        name="oauth-native-callback"
+        options={{ headerShown: false }}
+      />
     </Stack>
   );
 }

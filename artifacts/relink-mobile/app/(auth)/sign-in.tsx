@@ -7,10 +7,8 @@ import {
 import { Link, useRouter } from 'expo-router';
 import { useSignIn, useSSO } from '@clerk/expo';
 import * as WebBrowser from 'expo-web-browser';
-import * as AuthSession from 'expo-auth-session';
+import * as Linking from 'expo-linking';
 import colors from '@/constants/colors';
-
-WebBrowser.maybeCompleteAuthSession();
 
 function useWarmUpBrowser() {
   useEffect(() => {
@@ -72,7 +70,7 @@ export default function SignInScreen() {
     try {
       setSsoLoading(true);
       setSsoError('');
-      const redirectUrl = AuthSession.makeRedirectUri({ scheme: 'relink-mobile' });
+      const redirectUrl = Linking.createURL('/oauth-native-callback');
       const { createdSessionId, setActive } = await startSSOFlow({
         strategy: 'oauth_google',
         redirectUrl,
