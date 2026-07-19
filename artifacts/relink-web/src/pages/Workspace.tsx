@@ -206,6 +206,72 @@ export default function Workspace() {
       .catch(() => {});
   }, [relationId]);
 
+  // ── Auto-build memory if missing ───────────────────────────────────────────
+  useEffect(() => {
+    if (!relationId) return;
+    let cancelled = false;
+
+    const checkAndBuild = async () => {
+      try {
+        const memCheck = await fetch(`/api/relations/${relationId}/memory`);
+        if (!memCheck.ok) return;
+        const memData = await memCheck.json();
+        if (memData?.memory?.builtAt) return; // already built — nothing to do
+
+        // No memory yet — trigger build automatically
+        if (cancelled) return;
+        setUploadPhase("building");
+        setUploadSteps(["Lecture de la conversation…"]);
+        setUploadImported(null);
+
+        const STEP_LABELS: Record<string, string> = {
+          reading:    "Lecture de la conversation…",
+          detecting:  "Détection des messages…",
+          encrypting: "Chiffrement sécurisé…",
+          building:   "Analyse des dynamiques et construction de la mémoire…",
+          saving:     "Enregistrement…",
+          done:       "Analyse complète ✓",
+        };
+
+        const buildRes = await fetch(`/api/relations/${relationId}/memory/build`, { method: "POST" });
+        if (!buildRes.ok || !buildRes.body || cancelled) return;
+
+        const reader = buildRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done || cancelled) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop() ?? "";
+          for (const part of parts) {
+            for (const line of part.split("\n")) {
+              if (!line.startsWith("data: ")) continue;
+              try {
+                const ev = JSON.parse(line.slice(6));
+                if (ev.step) {
+                  const label = STEP_LABELS[ev.step] ?? ev.label ?? ev.step;
+                  setUploadSteps((p) => p[p.length - 1] === label ? p : [...p, label]);
+                }
+              } catch { /* ignore */ }
+            }
+          }
+        }
+
+        if (!cancelled) {
+          setUploadPhase("done");
+          setTimeout(() => setUploadPhase("idle"), 4000);
+        }
+      } catch {
+        if (!cancelled) setUploadPhase("idle");
+      }
+    };
+
+    checkAndBuild();
+    return () => { cancelled = true; };
+  }, [relationId]);
+
   // ── File upload handler ────────────────────────────────────────────────────
   const handleFileUpload = useCallback(async (file: File) => {
     if (!relationId) return;
@@ -971,7 +1037,7 @@ export default function Workspace() {
                     )}
                     {uploadPhase === "importing" && "Import en cours…"}
                     {uploadPhase === "building" && "Construction de la mémoire…"}
-                    {uploadPhase === "done" && `Prêt — ${uploadImported?.toLocaleString("fr-FR") ?? ""} messages analysés`}
+                    {uploadPhase === "done" && (uploadImported != null ? `Prêt — ${uploadImported.toLocaleString("fr-FR")} messages analysés` : "Mémoire construite ✓")}
                   </span>
                   {uploadPhase === "done" && (
                     <button onClick={() => setUploadPhase("idle")} className="text-muted-foreground hover:text-foreground">
