@@ -23,7 +23,14 @@ import {
   CheckCircle2,
   BrainCircuit,
   ImagePlus,
+  Smartphone,
+  ZoomIn,
+  Mic,
+  Square,
+  Wand2,
 } from "lucide-react";
+import { SuggestRepliesDialog } from "@/components/SuggestRepliesDialog";
+import { StrategyPanel, type StrategyResult } from "@/components/StrategyPanel";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -55,6 +62,7 @@ type WaMessage = {
   isMe: boolean;
   sentAt: string;
   importSource?: string;
+  mediaData?: string | null; // base64 data URL pour les images
 };
 
 type MonthEntry = { year: number; month: number; count: number };
@@ -130,6 +138,88 @@ export default function Workspace() {
   const [uploadImported, setUploadImported] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Lightbox pour les images ───────────────────────────────────────────────
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
+  // ── Générateur de réponses ─────────────────────────────────────────────────
+  const [suggestOpen, setSuggestOpen] = useState(false);
+
+  // ── Analyse stratégique message entrant ────────────────────────────────────
+  const [strategyResult, setStrategyResult] = useState<StrategyResult | null>(null);
+  const [strategyLoading, setStrategyLoading] = useState(false);
+  const lastAnalyzedMsgId = useRef<number | null>(null);
+
+  // ── Enregistrement vocal ───────────────────────────────────────────────────
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "audio/mp4";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        setIsTranscribing(true);
+        try {
+          const form = new FormData();
+          form.append("audio", blob, `recording.${mimeType.includes("mp4") ? "mp4" : "webm"}`);
+          const res = await fetch("/api/transcribe", { method: "POST", body: form }); // /api prefix ajouté par le proxy
+          const data = await res.json();
+          if (data.text) setChatInput((prev) => (prev ? prev + " " + data.text : data.text));
+        } catch { /* silently fail */ }
+        finally { setIsTranscribing(false); }
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+    } catch {
+      toast({ title: "Micro inaccessible", description: "Autorisez le micro dans votre navigateur.", variant: "destructive" });
+    }
+  }, [toast]);
+
+  const stopRecording = useCallback(() => {
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
+  }, []);
+
+  // ── Auto-refresh visuel ────────────────────────────────────────────────────
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  const [newMessageCount, setNewMessageCount] = useState(0);
+
+  // ── WhatsApp live status ───────────────────────────────────────────────────
+  const [waLiveStatus, setWaLiveStatus] = useState<"none" | "connected" | "connecting" | "disconnected">("none");
+  const [waContactPhone, setWaContactPhone] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!relationId) return;
+    let cancelled = false;
+    const check = () => {
+      fetch(`/api/relations/${relationId}/whatsapp/status`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (!cancelled) {
+            setWaLiveStatus(d.status ?? "none");
+            if (d.contactPhone) setWaContactPhone(d.contactPhone);
+          }
+        })
+        .catch(() => {});
+    };
+    check();
+    const interval = setInterval(check, 15_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [relationId]);
+
   // ── Image attachments state ────────────────────────────────────────────────
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -188,6 +278,10 @@ export default function Workspace() {
         setWaMessages(data.messages ?? []);
         setNextCursor(data.nextCursor ?? null);
         setTotalMessages(data.total ?? 0);
+        // Scroll vers le bas pour afficher les messages les plus récents
+        setTimeout(() => {
+          waScrollRef.current?.scrollTo({ top: waScrollRef.current.scrollHeight });
+        }, 80);
       })
       .catch(() => {})
       .finally(() => setWaLoading(false));
@@ -196,6 +290,69 @@ export default function Workspace() {
   useEffect(() => {
     loadInitial();
   }, [relationId]);
+
+  // ── Live refresh : nouveaux messages quand WhatsApp est connecté ───────────
+  const newestSentAtRef = useRef<string | null>(null);
+
+  // Garde newestSentAtRef synchronisé avec les messages affichés
+  useEffect(() => {
+    if (waMessages.length > 0) {
+      const last = waMessages[waMessages.length - 1];
+      newestSentAtRef.current = new Date(last.sentAt).toISOString();
+    }
+  }, [waMessages]);
+
+  // Quand WhatsApp passe à "connected", recharge les messages après un court délai
+  // (Baileys a besoin de quelques secondes pour écrire l'historique en DB)
+  const prevLiveStatus = useRef<string>("none");
+  useEffect(() => {
+    if (waLiveStatus === "connected" && prevLiveStatus.current !== "connected") {
+      // Recharge immédiatement, puis encore après 5s et 15s
+      // pour attraper les messages d'historique qui arrivent en chunks
+      loadInitial();
+      const t1 = setTimeout(() => loadInitial(), 5_000);
+      const t2 = setTimeout(() => loadInitial(), 15_000);
+      const t3 = setTimeout(() => loadInitial(), 30_000);
+      prevLiveStatus.current = "connected";
+      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    }
+    prevLiveStatus.current = waLiveStatus;
+  }, [waLiveStatus]);
+
+  useEffect(() => {
+    if (waLiveStatus !== "connected") return;
+    if (!relationId) return;
+
+    const poll = () => {
+      const after = newestSentAtRef.current;
+      if (!after) { loadInitial(); return; }
+
+      setIsAutoRefreshing(true);
+      fetch(`/api/relations/${relationId}/messages?after=${encodeURIComponent(after)}&limit=200`)
+        .then((r) => r.json())
+        .then((data) => {
+          const newMsgs: WaMessage[] = data.messages ?? [];
+          setTotalMessages(data.total ?? 0);
+          if (newMsgs.length === 0) return;
+          setWaMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id));
+            const toAdd = newMsgs.filter((m) => !existingIds.has(m.id));
+            if (toAdd.length === 0) return prev;
+            const el = waScrollRef.current;
+            const wasAtBottom = el ? el.scrollHeight - el.scrollTop - el.clientHeight < 120 : false;
+            const next = [...prev, ...toAdd];
+            if (!wasAtBottom) setNewMessageCount((c) => c + toAdd.length);
+            if (wasAtBottom) setTimeout(() => el?.scrollTo({ top: el.scrollHeight, behavior: "smooth" }), 50);
+            return next;
+          });
+        })
+        .catch(() => {})
+        .finally(() => setTimeout(() => setIsAutoRefreshing(false), 600));
+    };
+
+    const interval = setInterval(poll, 5_000);
+    return () => clearInterval(interval);
+  }, [waLiveStatus, relationId]);
 
   // ── Load months list ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -407,6 +564,17 @@ export default function Workspace() {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // ── Scroll agent to bottom when upload panel appears/expands ───────────────
+  useEffect(() => {
+    if (uploadPhase === "idle") return;
+    // Small delay lets ResizeObserver update paddingBottom first
+    const t = setTimeout(() => {
+      const el = agentScrollRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [uploadPhase, uploadSteps.length]);
 
   // ── Auto-intro for empty sessions ──────────────────────────────────────────
   useEffect(() => {
@@ -729,6 +897,38 @@ export default function Workspace() {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-full w-full bg-background overflow-hidden relative">
+
+      {/* ── Dialog suggestions de réponses ────────────────────────────────── */}
+      <SuggestRepliesDialog
+        open={suggestOpen}
+        onClose={() => setSuggestOpen(false)}
+        relationId={relationId}
+        contactName={relation?.participantOther ?? "Contact"}
+        contactPhone={waContactPhone}
+        waConnected={waLiveStatus === "connected"}
+        onPasteToAgent={(text) => setChatInput(text)}
+      />
+
+      {/* ── Lightbox ───────────────────────────────────────────────────────── */}
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white/70 hover:text-white p-2"
+            onClick={() => setLightboxSrc(null)}
+          >
+            <X className="h-6 w-6" />
+          </button>
+          <img
+            src={lightboxSrc}
+            alt="Image WhatsApp"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
       {/* Mobile Tabs */}
       <div className="md:hidden absolute top-0 left-0 right-0 z-10 bg-background/80 backdrop-blur-md border-b flex px-4">
         <button
@@ -769,7 +969,21 @@ export default function Workspace() {
               {relation.participantOther.charAt(0).toUpperCase()}
             </div>
             <div>
-              <div className="font-medium">{relation.participantOther}</div>
+              <div className="font-medium flex items-center gap-2">
+                {relation.participantOther}
+                {waLiveStatus === "connected" && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-green-700 bg-green-100 border border-green-200 rounded-full px-2 py-0.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
+                    WhatsApp en direct
+                  </span>
+                )}
+                {waLiveStatus === "connecting" && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                    Connexion…
+                  </span>
+                )}
+              </div>
               <div className="text-xs text-muted-foreground">
                 {totalMessages > 0
                   ? `${waMessages.length} / ${totalMessages.toLocaleString("fr-FR")} messages`
@@ -778,6 +992,18 @@ export default function Workspace() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {/* Badge nouveaux messages */}
+            {newMessageCount > 0 && (
+              <button
+                onClick={() => {
+                  setNewMessageCount(0);
+                  waScrollRef.current?.scrollTo({ top: waScrollRef.current.scrollHeight, behavior: "smooth" });
+                }}
+                className="flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/10 border border-primary/20 rounded-full px-2.5 py-1 hover:bg-primary/20 transition-colors"
+              >
+                ↓ {newMessageCount} nouveau{newMessageCount > 1 ? "x" : ""}
+              </button>
+            )}
             <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground">
               <Search className="h-5 w-5" />
             </Button>
@@ -786,10 +1012,50 @@ export default function Workspace() {
               size="icon"
               className="rounded-full text-muted-foreground"
               title="Mettre à jour la conversation"
-              onClick={loadInitial}
+              onClick={() => { loadInitial(); setNewMessageCount(0); }}
               disabled={waLoading}
             >
-              <RefreshCw className={cn("h-4 w-4", waLoading && "animate-spin")} />
+              <RefreshCw className={cn("h-4 w-4", (waLoading || isAutoRefreshing) && "animate-spin")} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "rounded-full",
+                strategyLoading
+                  ? "text-primary animate-pulse"
+                  : strategyResult
+                  ? "text-primary bg-primary/10"
+                  : "text-muted-foreground hover:text-primary"
+              )}
+              title="Analyser le dernier message reçu"
+              onClick={() => {
+                setStrategyResult(null);
+                setStrategyLoading(true);
+                fetch(`/api/relations/${relationId}/analyze-incoming`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({}),
+                })
+                  .then((r) => r.json())
+                  .then((d) => setStrategyResult(d))
+                  .catch(() => setStrategyResult(null))
+                  .finally(() => setStrategyLoading(false));
+              }}
+              disabled={strategyLoading}
+            >
+              {strategyLoading
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <BrainCircuit className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full text-violet-500 hover:bg-violet-50 hover:text-violet-600"
+              title="Générer une réponse WhatsApp"
+              onClick={() => setSuggestOpen(true)}
+            >
+              <Wand2 className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -887,6 +1153,9 @@ export default function Workspace() {
                   new Date(msg.sentAt).getDate() !== new Date(waMessages[i - 1].sentAt).getDate();
                 const isSelected = activeMessageId === msg.id;
 
+                const isImage = !!msg.mediaData && msg.mediaData.startsWith("data:image");
+                const isAudio = !!msg.mediaData && msg.mediaData.startsWith("data:audio");
+
                 return (
                   <div key={msg.id} className="space-y-4">
                     {showDate && (
@@ -899,31 +1168,131 @@ export default function Workspace() {
                     <div className={cn("flex", msg.isMe ? "justify-end" : "justify-start")}>
                       <div
                         onClick={() => {
+                          if (isImage) return; // image click gérée séparément
                           setActiveMessageId(isSelected ? null : msg.id);
                           if (!isSelected && window.innerWidth < 768) setMobileTab("agent");
                         }}
                         className={cn(
-                          "relative max-w-[85%] md:max-w-[75%] px-4 py-2.5 rounded-2xl text-[15px] leading-relaxed cursor-pointer transition-all select-none",
+                          "relative max-w-[85%] md:max-w-[75%] rounded-2xl text-[15px] leading-relaxed cursor-pointer transition-all select-none overflow-hidden",
+                          isImage ? "p-0" : "px-4 py-2.5",
                           msg.isMe
                             ? "bg-primary text-primary-foreground rounded-tr-sm"
                             : "bg-background border rounded-tl-sm",
                           isSelected && "ring-2 ring-amber-400 ring-offset-2 ring-offset-background"
                         )}
                       >
-                        {!msg.isMe && (
+                        {!msg.isMe && !isImage && (
                           <div className="text-[11px] font-semibold text-amber-600 mb-1">
                             {msg.sender}
                           </div>
                         )}
-                        {msg.content}
-                        <div
-                          className={cn(
-                            "text-[10px] mt-1.5 text-right",
-                            msg.isMe ? "text-primary-foreground/60" : "text-muted-foreground"
-                          )}
-                        >
-                          {format(new Date(msg.sentAt), "HH:mm")}
-                        </div>
+
+                        {/* ── Image inline ── */}
+                        {isImage && (
+                          <div className="relative group">
+                            {!msg.isMe && (
+                              <div className="absolute top-2 left-2 z-10 text-[11px] font-semibold text-white bg-black/40 rounded px-1.5 py-0.5 backdrop-blur-sm">
+                                {msg.sender}
+                              </div>
+                            )}
+                            <img
+                              src={msg.mediaData!}
+                              alt="Image WhatsApp"
+                              className="max-w-[240px] max-h-[300px] w-auto h-auto object-cover rounded-2xl block"
+                              onClick={() => setLightboxSrc(msg.mediaData!)}
+                            />
+                            <button
+                              onClick={() => setLightboxSrc(msg.mediaData!)}
+                              className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/20 transition-colors rounded-2xl"
+                            >
+                              <ZoomIn className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
+                            </button>
+                            {msg.content && msg.content !== "[Image]" && (
+                              <div className={cn(
+                                "px-3 pb-2 pt-1 text-[13px]",
+                                msg.isMe ? "text-primary-foreground" : "text-foreground"
+                              )}>
+                                {msg.content}
+                              </div>
+                            )}
+                            <div className={cn(
+                              "text-[10px] px-3 pb-2 text-right",
+                              msg.isMe ? "text-primary-foreground/60" : "text-muted-foreground"
+                            )}>
+                              {format(new Date(msg.sentAt), "HH:mm")}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── Message vocal avec lecteur audio ── */}
+                        {isAudio && (
+                          <div className="space-y-2 py-0.5">
+                            {!msg.isMe && (
+                              <div className="text-[11px] font-semibold text-amber-600">{msg.sender}</div>
+                            )}
+                            <audio
+                              controls
+                              src={msg.mediaData}
+                              className="w-full max-w-[260px] h-9"
+                              style={{ colorScheme: msg.isMe ? "dark" : "light" }}
+                            />
+                            {msg.content && msg.content !== "[Message vocal]" && (
+                              <p className={cn(
+                                "text-[13px] leading-relaxed italic border-l-2 pl-2",
+                                msg.isMe
+                                  ? "border-primary-foreground/30 text-primary-foreground/80"
+                                  : "border-muted-foreground/30 text-muted-foreground"
+                              )}>
+                                {msg.content.replace(/^\[Vocal\] /, "")}
+                              </p>
+                            )}
+                            <div className={cn(
+                              "text-[10px] text-right",
+                              msg.isMe ? "text-primary-foreground/60" : "text-muted-foreground"
+                            )}>
+                              {format(new Date(msg.sentAt), "HH:mm")}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── Placeholder image sans data ── */}
+                        {!isImage && !isAudio && msg.content === "[Image]" && (
+                          <div
+                            onClick={() => {
+                              setActiveMessageId(isSelected ? null : msg.id);
+                              if (!isSelected && window.innerWidth < 768) setMobileTab("agent");
+                            }}
+                            className="flex items-center gap-2.5 py-0.5"
+                          >
+                            <div className={cn(
+                              "w-9 h-9 rounded-xl flex items-center justify-center shrink-0",
+                              msg.isMe ? "bg-primary-foreground/15" : "bg-muted"
+                            )}>
+                              <ImagePlus className={cn("h-4 w-4", msg.isMe ? "text-primary-foreground/60" : "text-muted-foreground")} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className={cn("text-[13px]", msg.isMe ? "text-primary-foreground/80" : "text-muted-foreground")}>
+                                Photo
+                              </div>
+                              <div className={cn("text-[10px]", msg.isMe ? "text-primary-foreground/50" : "text-muted-foreground/60")}>
+                                {format(new Date(msg.sentAt), "HH:mm")}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── Texte normal ── */}
+                        {!isImage && msg.content !== "[Image]" && (
+                          <>
+                            {msg.content}
+                            <div className={cn(
+                              "text-[10px] mt-1.5 text-right",
+                              msg.isMe ? "text-primary-foreground/60" : "text-muted-foreground"
+                            )}>
+                              {format(new Date(msg.sentAt), "HH:mm")}
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -932,6 +1301,17 @@ export default function Workspace() {
             )}
           </div>
           </div>{/* end waScroll */}
+
+          {/* ── StrategyPanel — analyse message entrant ──────────────────── */}
+          {(strategyLoading || strategyResult) && (
+            <StrategyPanel
+              result={strategyResult ?? {}}
+              isLoading={strategyLoading}
+              relationId={relationId}
+              onDismiss={() => { setStrategyResult(null); setStrategyLoading(false); }}
+              onSent={() => loadInitial()}
+            />
+          )}
         </div>{/* end body (month strip + messages) */}
       </div>{/* end left panel */}
 
@@ -1169,6 +1549,32 @@ export default function Workspace() {
                   title="Joindre une image"
                 >
                   <ImagePlus className="h-4 w-4" />
+                </button>
+
+                {/* Microphone — enregistrement vocal */}
+                <button
+                  onMouseDown={startRecording}
+                  onMouseUp={stopRecording}
+                  onTouchStart={startRecording}
+                  onTouchEnd={stopRecording}
+                  disabled={isStreaming || !activeSessionId || isTranscribing}
+                  className={cn(
+                    "self-end mb-1.5 h-9 w-9 rounded-full flex items-center justify-center transition-all shrink-0",
+                    isRecording
+                      ? "bg-red-500 text-white animate-pulse shadow-md shadow-red-200"
+                      : isTranscribing
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                  )}
+                  title={isRecording ? "Relâcher pour transcrire" : "Maintenir pour enregistrer"}
+                >
+                  {isTranscribing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : isRecording ? (
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                  ) : (
+                    <Mic className="h-4 w-4" />
+                  )}
                 </button>
 
                 {/* Paste toggle */}

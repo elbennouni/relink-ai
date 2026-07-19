@@ -6,6 +6,7 @@ export const relationStatusEnum = pgEnum("relation_status", ["active", "paused",
 
 export const relationsTable = pgTable("relations", {
   id: serial("id").primaryKey(),
+  userId: text("user_id"), // null = legacy/unclaimed; claimed by first authenticated user
   name: text("name").notNull(),
   participantMe: text("participant_me").notNull(),
   participantOther: text("participant_other").notNull(),

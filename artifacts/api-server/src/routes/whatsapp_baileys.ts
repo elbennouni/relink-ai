@@ -72,6 +72,31 @@ function jidToPhone(jid: string): string {
   return jid.replace(/@.*$/, "").replace(/[^0-9]/g, "");
 }
 
+/** Download a WhatsApp media message and return a base64 data URL */
+async function downloadMediaAsDataUrl(
+  msg: WAMessage,
+  type: "image" | "audio" | "video"
+): Promise<string | null> {
+  try {
+    const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
+    const m = msg.message!;
+    const mediaMsg =
+      type === "image" ? m.imageMessage :
+      type === "audio" ? (m.audioMessage ?? m.pttMessage) :
+      m.videoMessage;
+    if (!mediaMsg) return null;
+
+    const stream = await downloadContentFromMessage(mediaMsg as Parameters<typeof downloadContentFromMessage>[0], type);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    const buffer = Buffer.concat(chunks);
+    const mimeType = (mediaMsg as { mimetype?: string }).mimetype ?? (type === "image" ? "image/jpeg" : type === "audio" ? "audio/ogg" : "video/mp4");
+    return `data:${mimeType};base64,${buffer.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
 /** Download and transcribe a WhatsApp audio message */
 async function transcribeWhatsappAudio(
   msg: WAMessage,
@@ -137,8 +162,10 @@ async function startSession(relationId: number, contactPhone?: string) {
       keys: makeCacheableSignalKeyStore(state.keys, console as unknown as Parameters<typeof makeCacheableSignalKeyStore>[1]),
     },
     printQRInTerminal: false,
-    syncFullHistory: true, // try to pull history
-    getMessage: async () => undefined,
+    syncFullHistory: false,
+    // Returning a non-undefined value is critical — Baileys drops incoming
+    // messages silently when getMessage returns undefined (needed for retries).
+    getMessage: async (_key) => ({ conversation: "" }),
   });
   session.socket = sock;
 
@@ -180,67 +207,133 @@ async function startSession(relationId: number, contactPhone?: string) {
     }
   });
 
-  sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify" && type !== "append") return;
+  // ── Extract content + media from a single WAMessage ─────────────────────────
+  async function extractMessage(msg: WAMessage, skipAudio: boolean): Promise<{ content: string; mediaData: string | null } | null> {
+    const m = msg.message!;
+    let content = "";
+    let mediaData: string | null = null;
 
-    for (const msg of messages) {
+    if (m.conversation) {
+      content = m.conversation;
+    } else if (m.extendedTextMessage?.text) {
+      content = m.extendedTextMessage.text;
+    } else if ((m.audioMessage || m.pttMessage) && !skipAudio) {
+      const [transcription, audioData] = await Promise.all([
+        transcribeWhatsappAudio(msg, sock),
+        downloadMediaAsDataUrl(msg, "audio"),
+      ]);
+      content = transcription;
+      mediaData = audioData;
+    } else if (m.audioMessage || m.pttMessage) {
+      content = "[Message vocal]";
+    } else if (m.imageMessage) {
+      content = m.imageMessage.caption || "[Image]";
+      if (!skipAudio) mediaData = await downloadMediaAsDataUrl(msg, "image");
+    } else if (m.videoMessage) {
+      content = m.videoMessage.caption ? `[Vidéo] ${m.videoMessage.caption}` : "[Vidéo]";
+    } else if (m.documentMessage) {
+      content = `[Document: ${m.documentMessage.fileName ?? "fichier"}]`;
+    } else if (m.stickerMessage) {
+      content = "[Sticker]";
+    } else if (m.reactionMessage) {
+      content = `[Réaction: ${m.reactionMessage.text ?? "?"}]`;
+    } else {
+      return null;
+    }
+
+    return { content, mediaData };
+  }
+
+  // ── Persist one message into the correct relation ─────────────────────────────
+  async function persistMessage(
+    msg: WAMessage,
+    targetRelationId: number,
+    isMe: boolean,
+    senderPhone: string,
+    content: string,
+    mediaData: string | null,
+    sentAt: Date,
+  ) {
+    const hash = crypto
+      .createHash("md5")
+      .update(`${msg.key.id}:${targetRelationId}`)
+      .digest("hex");
+    try {
+      await db
+        .insert(whatsappMessagesTable)
+        .values({
+          relationId: targetRelationId,
+          sender: isMe ? "Moi" : (senderPhone || "Contact"),
+          content,
+          isMe,
+          sentAt,
+          importSource: "whatsapp_file",
+          contentHash: hash,
+          ...(mediaData ? { mediaData } : {}),
+        })
+        .onConflictDoNothing();
+    } catch { /* ignore constraint errors */ }
+  }
+
+  // ── Shared helper : persist a list of WAMessages ─────────────────────────────
+  // For incoming (fromMe=false) messages, searches ALL active sessions to find
+  // the relation whose contactPhone matches the sender — because WhatsApp may
+  // deliver the message to any of the open web sessions.
+  async function storeMessages(msgs: WAMessage[], skipAudio = false) {
+    for (const msg of msgs) {
       if (!msg.message) continue;
       const jid = msg.key.remoteJid ?? "";
-      if (jid.endsWith("@g.us") || jid.endsWith("@broadcast")) continue; // skip groups
+      if (jid.endsWith("@g.us") || jid.endsWith("@broadcast")) continue;
 
+      const isMe = msg.key.fromMe ?? false;
+      const chatPhone = jidToPhone(jid);
       const senderJid = msg.key.participant ?? msg.key.remoteJid ?? "";
       const senderPhone = jidToPhone(senderJid || (msg.key.remoteJid ?? ""));
-      const isMe = msg.key.fromMe ?? false;
-
-      // If contactPhone is configured, only store messages from/to that contact
-      const contactPhone = session.contactPhone?.replace(/\D/g, "");
-      const chatPhone = jidToPhone(jid);
-      if (contactPhone && chatPhone !== contactPhone && !isMe) continue;
-
-      let content = "";
-      const m = msg.message;
-
-      if (m.conversation) {
-        content = m.conversation;
-      } else if (m.extendedTextMessage?.text) {
-        content = m.extendedTextMessage.text;
-      } else if (m.audioMessage || m.pttMessage) {
-        content = await transcribeWhatsappAudio(msg, sock);
-      } else if (m.imageMessage) {
-        content = m.imageMessage.caption ? `[Image] ${m.imageMessage.caption}` : "[Image]";
-      } else if (m.videoMessage) {
-        content = m.videoMessage.caption ? `[Vidéo] ${m.videoMessage.caption}` : "[Vidéo]";
-      } else if (m.documentMessage) {
-        content = `[Document: ${m.documentMessage.fileName ?? "fichier"}]`;
-      } else if (m.stickerMessage) {
-        content = "[Sticker]";
-      } else if (m.reactionMessage) {
-        content = `[Réaction: ${m.reactionMessage.text ?? "?"}]`;
-      } else {
-        continue; // skip unknown types
-      }
 
       const sentAt = new Date(Number(msg.messageTimestamp) * 1000);
-      const hash = crypto
-        .createHash("md5")
-        .update(`${msg.key.id}${relationId}`)
-        .digest("hex");
+      if (isNaN(sentAt.getTime()) || sentAt.getFullYear() < 2000) continue;
 
-      try {
-        await db
-          .insert(whatsappMessagesTable)
-          .values({
-            relationId,
-            sender: isMe ? "Moi" : (senderPhone || "Contact"),
-            content,
-            isMe,
-            sentAt,
-            importSource: "whatsapp_file",
-            contentHash: hash,
-          })
-          .onConflictDoNothing();
-      } catch { /* ignore constraint errors */ }
+      const extracted = await extractMessage(msg, skipAudio);
+      if (!extracted) continue;
+      const { content, mediaData } = extracted;
+
+      if (isMe) {
+        // Own message — store in current relation (user is talking to this relation's contact)
+        const myContactPhone = session.contactPhone?.replace(/\D/g, "");
+        if (!myContactPhone || chatPhone === myContactPhone) {
+          await persistMessage(msg, relationId, true, senderPhone, content, mediaData, sentAt);
+        }
+      } else {
+        // Incoming message — route to the relation whose contactPhone matches chatPhone.
+        // Search ALL sessions (WhatsApp may deliver to any open web session).
+        let stored = false;
+        for (const [relId, relSession] of sessions.entries()) {
+          const cp = relSession.contactPhone?.replace(/\D/g, "");
+          if (cp && chatPhone === cp) {
+            console.log(`[Baileys:${relationId}→${relId}] Incoming from ${chatPhone}: "${content.slice(0, 60)}"`);
+            await persistMessage(msg, relId, false, senderPhone, content, mediaData, sentAt);
+            stored = true;
+          }
+        }
+        if (!stored) {
+          console.log(`[Baileys:${relationId}] No relation matches incoming from ${chatPhone} (known: ${[...sessions.values()].map(s => s.contactPhone?.replace(/\D/g, "")).join(",")})`);
+        }
+      }
     }
+  }
+
+  // ── New messages arriving in real time ────────────────────────────────────
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    console.log(`[Baileys:${relationId}] upsert type=${type} count=${messages.length} jids=${messages.map(m => `${m.key.remoteJid}(fromMe=${m.key.fromMe})`).join(",")}`);
+    if (type !== "notify" && type !== "append") return;
+    await storeMessages(messages, false);
+  });
+
+  // ── Historical messages (WhatsApp delivers past conversations on connect) ──
+  sock.ev.on("messages.history-set", async ({ messages, isLatest }) => {
+    console.log(`[Baileys] history-set: ${messages.length} messages (isLatest=${isLatest}) for relation ${relationId}`);
+    // Skip audio transcription for history (too slow for bulk); store as [Message vocal]
+    await storeMessages(messages as WAMessage[], true);
   });
 }
 
@@ -318,6 +411,34 @@ router.get("/relations/:id/whatsapp/status", (req, res) => {
     status: session?.status ?? (hasFiles ? "connecting" : "none"),
     contactPhone: session?.contactPhone ?? readConfig(relationId).contactPhone,
   });
+});
+
+/** POST /relations/:id/whatsapp/send */
+router.post("/relations/:id/whatsapp/send", async (req, res) => {
+  const relationId = Number(req.params.id);
+  const session = sessions.get(relationId);
+
+  if (!session || session.status !== "connected") {
+    res.status(400).json({ error: "WhatsApp not connected" });
+    return;
+  }
+
+  const phone = session.contactPhone?.replace(/\D/g, "");
+  if (!phone) {
+    res.status(400).json({ error: "No contact phone configured" });
+    return;
+  }
+
+  const { text } = req.body;
+  if (!text || typeof text !== "string") {
+    res.status(400).json({ error: "text is required" });
+    return;
+  }
+
+  const jid = `${phone}@s.whatsapp.net`;
+  await session.socket.sendMessage(jid, { text });
+
+  res.json({ success: true, to: phone });
 });
 
 /** POST /api/relations/:id/whatsapp/disconnect-qr */

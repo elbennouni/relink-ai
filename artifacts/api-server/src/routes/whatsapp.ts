@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { whatsappMessagesTable, relationsTable } from "@workspace/db";
-import { eq, and, inArray, lt, desc, like, gte, count, max, min, sql } from "drizzle-orm";
+import { eq, and, inArray, lt, gt, desc, asc, like, gte, count, max, min, sql } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
@@ -391,11 +391,44 @@ router.get("/relations/:relationId/messages", async (req, res) => {
   if (isNaN(relationId)) { res.status(400).json({ error: "ID invalide" }); return; }
 
   const limit = Math.min(Number(req.query.limit) || 50, 1000);
-  const cursor = req.query.cursor as string | undefined;
+  const cursor = req.query.cursor as string | undefined;   // older than (pagination arrière)
+  const after  = req.query.after  as string | undefined;   // newer than (live refresh)
   const search = req.query.search as string | undefined;
   const dateFilter = req.query.date as string | undefined;
   const yearFilter  = req.query.year  ? Number(req.query.year)  : undefined;
   const monthFilter = req.query.month ? Number(req.query.month) : undefined;
+
+  // Mode "after" : retourne les messages plus récents que la date donnée (pour le live refresh)
+  if (after) {
+    // Recule de 10s pour rattraper les messages dont l'horloge est légèrement décalée.
+    // La déduplication côté client (existingIds Set) empêche les doublons.
+    const afterDate = new Date(new Date(after).getTime() - 10_000);
+    const newMsgs = await db
+      .select()
+      .from(whatsappMessagesTable)
+      .where(and(
+        eq(whatsappMessagesTable.relationId, relationId),
+        gte(whatsappMessagesTable.sentAt, afterDate)
+      ))
+      .orderBy(asc(whatsappMessagesTable.sentAt))
+      .limit(200);
+
+    const [total] = await db
+      .select({ count: count() })
+      .from(whatsappMessagesTable)
+      .where(eq(whatsappMessagesTable.relationId, relationId));
+
+    res.json({
+      messages: newMsgs.map((m) => ({
+        id: m.id, relationId: m.relationId, sender: m.sender,
+        content: m.content, isMe: m.isMe, sentAt: m.sentAt,
+        importSource: m.importSource, mediaData: m.mediaData ?? null,
+      })),
+      nextCursor: null,
+      total: total?.count ?? 0,
+    });
+    return;
+  }
 
   let query = db
     .select()
@@ -447,6 +480,7 @@ router.get("/relations/:relationId/messages", async (req, res) => {
         isMe: m.isMe,
         sentAt: m.sentAt,
         importSource: m.importSource,
+        mediaData: m.mediaData ?? null,
       }))
       .reverse(),
     nextCursor: hasMore ? items[items.length - 1].sentAt.toISOString() : null,

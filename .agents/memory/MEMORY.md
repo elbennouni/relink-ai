@@ -1,2 +1,3 @@
 - [ReLink AI stack](relink-stack.md) — Anthropic SSE routes must use fetch+ReadableStream, not orval hooks; api-zod is empty (export {}), use manual zod schemas in routes
 - [API server build quirks](api-server-build.md) — zod must be in api-server dependencies explicitly; health.ts must not import from api-zod; useToast lives in @/hooks/use-toast not @/components/ui/toast
+- [WhatsApp media handling](whatsapp-media.md) — images/audio stored as base64 in media_data column; isImage/isAudio must check data URL prefix, not just !!mediaData; multer needed for /api/transcribe

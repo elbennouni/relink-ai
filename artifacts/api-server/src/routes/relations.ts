@@ -16,9 +16,18 @@ const createRelationBody = z.object({
   participantOther: z.string().min(1),
 });
 
-// GET /api/relations
+// GET /api/relations — only current user's relations (+ auto-claim legacy null-userId rows)
 router.get("/relations", async (req, res) => {
-  const relations = await db.select().from(relationsTable).orderBy(relationsTable.createdAt);
+  const userId = (req as any).userId as string;
+
+  // Return only relations that explicitly belong to this user.
+  // Legacy null-userId relations are not exposed here — users must explicitly
+  // claim them via POST /api/admin/claim-legacy.
+  const relations = await db
+    .select()
+    .from(relationsTable)
+    .where(eq(relationsTable.userId, userId))
+    .orderBy(relationsTable.createdAt);
 
   const enriched = await Promise.all(
     relations.map(async (r) => {
@@ -55,8 +64,9 @@ router.get("/relations", async (req, res) => {
   res.json(enriched);
 });
 
-// POST /api/relations
+// POST /api/relations — always assign to current user
 router.post("/relations", async (req, res) => {
+  const userId = (req as any).userId as string;
   const parsed = createRelationBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Données invalides" });
@@ -66,6 +76,7 @@ router.post("/relations", async (req, res) => {
   const [relation] = await db
     .insert(relationsTable)
     .values({
+      userId,
       name: parsed.data.name,
       participantMe: parsed.data.participantMe,
       participantOther: parsed.data.participantOther,
@@ -80,7 +91,7 @@ router.post("/relations", async (req, res) => {
   });
 });
 
-// GET /api/relations/:relationId
+// GET /api/relations/:relationId — ownership already verified by middleware
 router.get("/relations/:relationId", async (req, res) => {
   const relationId = Number(req.params.relationId);
   if (isNaN(relationId)) { res.status(400).json({ error: "ID invalide" }); return; }
@@ -124,7 +135,28 @@ router.get("/relations/:relationId", async (req, res) => {
   });
 });
 
-// DELETE /api/relations/:relationId
+// PATCH /relations/:relationId — ownership already verified by middleware
+router.patch("/relations/:relationId", async (req, res) => {
+  const relationId = Number(req.params.relationId);
+  if (isNaN(relationId)) { res.status(400).json({ error: "ID invalide" }); return; }
+
+  const { name, participantOther } = req.body ?? {};
+  if (!name && !participantOther) {
+    res.status(400).json({ error: "Au moins un champ requis (name, participantOther)" });
+    return;
+  }
+
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  if (name) updates.name = String(name).trim();
+  if (participantOther) updates.participantOther = String(participantOther).trim();
+
+  await db.update(relationsTable).set(updates).where(eq(relationsTable.id, relationId));
+
+  const [updated] = await db.select().from(relationsTable).where(eq(relationsTable.id, relationId)).limit(1);
+  res.json(updated);
+});
+
+// DELETE /api/relations/:relationId — ownership already verified by middleware
 router.delete("/relations/:relationId", async (req, res) => {
   const relationId = Number(req.params.relationId);
   if (isNaN(relationId)) { res.status(400).json({ error: "ID invalide" }); return; }

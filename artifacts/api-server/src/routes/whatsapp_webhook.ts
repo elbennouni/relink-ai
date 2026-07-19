@@ -1,24 +1,23 @@
 import { Router } from "express";
-import { db, whatsappAccountsTable, whatsappMessagesTable, relationsTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { db, whatsappAccountsTable, whatsappMessagesTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import { openai } from "@workspace/integrations-openai-ai-server";
 
-const router = Router();
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Download a media file from Meta Graph API and return its buffer + mime type */
-async function downloadMetaMedia(mediaId: string, accessToken: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+async function downloadMetaMedia(
+  mediaId: string,
+  accessToken: string,
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
   try {
-    // 1. Get media URL
     const urlRes = await fetch(`https://graph.facebook.com/v20.0/${mediaId}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!urlRes.ok) return null;
     const { url, mime_type } = (await urlRes.json()) as { url: string; mime_type: string };
 
-    // 2. Download binary
     const mediaRes = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -33,7 +32,13 @@ async function downloadMetaMedia(mediaId: string, accessToken: string): Promise<
 /** Transcribe an audio buffer using OpenAI Whisper */
 async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string> {
   try {
-    const ext = mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") ? "mp4" : mimeType.includes("mpeg") ? "mp3" : "ogg";
+    const ext = mimeType.includes("ogg")
+      ? "ogg"
+      : mimeType.includes("mp4")
+        ? "mp4"
+        : mimeType.includes("mpeg")
+          ? "mp3"
+          : "ogg";
     const file = new File([buffer], `audio.${ext}`, { type: mimeType });
     const result = await openai.audio.transcriptions.create({
       model: "gpt-4o-mini-transcribe",
@@ -46,15 +51,13 @@ async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string
   }
 }
 
-// ─── Verify webhook signature ─────────────────────────────────────────────────
-function verifySignature(rawBody: Buffer, signature: string, appSecret: string): boolean {
-  if (!signature.startsWith("sha256=")) return false;
-  const expected = crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex");
-  return crypto.timingSafeEqual(Buffer.from(signature.slice(7)), Buffer.from(expected));
-}
+// ─── PUBLIC router — only Meta webhook endpoints (no Clerk session required) ──
+// These endpoints are called by Meta's servers, which cannot present a Clerk
+// session cookie. They are secured by Meta's HMAC signature + verify token.
+export const webhookPublicRouter = Router();
 
-// ─── GET /api/webhook/whatsapp — Meta verification challenge ─────────────────
-router.get("/webhook/whatsapp", async (req, res) => {
+// GET /api/webhook/whatsapp — Meta hub.challenge verification
+webhookPublicRouter.get("/webhook/whatsapp", async (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
@@ -64,7 +67,6 @@ router.get("/webhook/whatsapp", async (req, res) => {
     return;
   }
 
-  // Accept if any registered account matches this verify token
   const accounts = await db.select().from(whatsappAccountsTable);
   const match = accounts.find((a) => a.verifyToken === token);
   if (!match) {
@@ -75,8 +77,39 @@ router.get("/webhook/whatsapp", async (req, res) => {
   res.status(200).send(String(challenge));
 });
 
-// ─── POST /api/webhook/whatsapp — Receive messages ───────────────────────────
-router.post("/webhook/whatsapp", async (req, res) => {
+// POST /api/webhook/whatsapp — Inbound messages from Meta
+webhookPublicRouter.post("/webhook/whatsapp", async (req, res) => {
+  // ── Signature verification ──────────────────────────────────────────────────
+  // Meta signs every POST with X-Hub-Signature-256 using the Meta App Secret.
+  // If META_WEBHOOK_SECRET is set, we enforce verification and reject bad payloads.
+  // If not set, we warn and continue (development mode only).
+  const appSecret = process.env.META_WEBHOOK_SECRET;
+  const signature = req.get("X-Hub-Signature-256") ?? "";
+  const rawBody = (req as any).rawBody as Buffer | undefined;
+
+  if (appSecret) {
+    if (!rawBody || !signature.startsWith("sha256=")) {
+      res.sendStatus(401);
+      return;
+    }
+    const expected =
+      "sha256=" +
+      crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex");
+    // Both strings must be equal length for timingSafeEqual
+    if (
+      signature.length !== expected.length ||
+      !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+    ) {
+      console.warn("[Webhook] Invalid X-Hub-Signature-256 — rejecting payload");
+      res.sendStatus(401);
+      return;
+    }
+  } else {
+    console.warn(
+      "[Webhook] META_WEBHOOK_SECRET not set — skipping HMAC verification (set in production)",
+    );
+  }
+
   // Always respond 200 immediately so Meta doesn't retry
   res.sendStatus(200);
 
@@ -91,7 +124,6 @@ router.post("/webhook/whatsapp", async (req, res) => {
         const phoneNumberId = value.metadata?.phone_number_id;
         if (!phoneNumberId) continue;
 
-        // Find the account config for this phone number
         const [account] = await db
           .select()
           .from(whatsappAccountsTable)
@@ -100,9 +132,10 @@ router.post("/webhook/whatsapp", async (req, res) => {
         if (!account) continue;
 
         for (const msg of value.messages ?? []) {
-          // Determine if this message is from us (our business number) or the contact
           const senderPhone = msg.from;
-          const isMe = !account.contactPhone || senderPhone !== account.contactPhone.replace(/\D/g, "");
+          const isMe =
+            !account.contactPhone ||
+            senderPhone !== account.contactPhone.replace(/\D/g, "");
 
           let content = "";
 
@@ -135,9 +168,11 @@ router.post("/webhook/whatsapp", async (req, res) => {
 
           if (!content) continue;
 
-          // Dedup: skip if contentHash already exists
           const sentAt = new Date(Number(msg.timestamp) * 1000);
-          const hash = crypto.createHash("md5").update(`${msg.id}${account.relationId}`).digest("hex");
+          const hash = crypto
+            .createHash("md5")
+            .update(`${msg.id}${account.relationId}`)
+            .digest("hex");
 
           const existing = await db
             .select({ id: whatsappMessagesTable.id })
@@ -164,8 +199,12 @@ router.post("/webhook/whatsapp", async (req, res) => {
   }
 });
 
-// ─── GET /api/relations/:id/whatsapp/config ───────────────────────────────────
-router.get("/relations/:id/whatsapp/config", async (req, res) => {
+// ─── PRIVATE router — relation WhatsApp config (requires auth + ownership) ────
+// Mounted after requireAuth and requireRelationOwnership in routes/index.ts.
+export const whatsappConfigRouter = Router();
+
+// GET /api/relations/:id/whatsapp/config
+whatsappConfigRouter.get("/relations/:id/whatsapp/config", async (req, res) => {
   const relationId = Number(req.params.id);
   const [account] = await db
     .select()
@@ -187,8 +226,8 @@ router.get("/relations/:id/whatsapp/config", async (req, res) => {
   });
 });
 
-// ─── POST /api/relations/:id/whatsapp/config ──────────────────────────────────
-router.post("/relations/:id/whatsapp/config", async (req, res) => {
+// POST /api/relations/:id/whatsapp/config
+whatsappConfigRouter.post("/relations/:id/whatsapp/config", async (req, res) => {
   const relationId = Number(req.params.id);
   const { phoneNumberId, accessToken, businessAccountId, contactPhone } = req.body as {
     phoneNumberId: string;
@@ -202,30 +241,40 @@ router.post("/relations/:id/whatsapp/config", async (req, res) => {
     return;
   }
 
-  // Generate a unique verify token for this account
   const verifyToken = crypto.randomBytes(24).toString("hex");
 
   await db
     .insert(whatsappAccountsTable)
-    .values({ relationId, phoneNumberId, accessToken, businessAccountId, contactPhone, verifyToken })
+    .values({
+      relationId,
+      phoneNumberId,
+      accessToken,
+      businessAccountId,
+      contactPhone,
+      verifyToken,
+    })
     .onConflictDoUpdate({
       target: whatsappAccountsTable.relationId,
-      set: { phoneNumberId, accessToken, businessAccountId, contactPhone, updatedAt: new Date() },
+      set: {
+        phoneNumberId,
+        accessToken,
+        businessAccountId,
+        contactPhone,
+        updatedAt: new Date(),
+      },
     });
 
   res.json({ success: true, verifyToken });
 });
 
-// ─── DELETE /api/relations/:id/whatsapp/config ────────────────────────────────
-router.delete("/relations/:id/whatsapp/config", async (req, res) => {
+// DELETE /api/relations/:id/whatsapp/config
+whatsappConfigRouter.delete("/relations/:id/whatsapp/config", async (req, res) => {
   const relationId = Number(req.params.id);
   await db.delete(whatsappAccountsTable).where(eq(whatsappAccountsTable.relationId, relationId));
   res.json({ success: true });
 });
 
-export default router;
-
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface WhatsappWebhookPayload {
   object: string;

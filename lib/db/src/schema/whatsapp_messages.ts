@@ -14,6 +14,7 @@ export const whatsappMessagesTable = pgTable("whatsapp_messages", {
   sentAt: timestamp("sent_at").notNull(),
   importSource: importSourceEnum("import_source").notNull().default("manual"),
   contentHash: text("content_hash"),
+  mediaData: text("media_data"), // base64 data URL pour les images/vocaux
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

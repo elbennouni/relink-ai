@@ -1,0 +1,2 @@
+# WhatsApp Baileys session files — contain private key material, never commit
+.baileys-sessions/

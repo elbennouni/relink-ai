@@ -1,7 +1,8 @@
 import { Link, useLocation } from "wouter";
-import { Home, MessageSquare, BrainCircuit, Settings, ShieldOff, Smartphone } from "lucide-react";
+import { Home, MessageSquare, BrainCircuit, Settings, ShieldOff, Smartphone, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
+import { useAuth, useUser, useClerk } from "@clerk/react";
 
 interface AppShellProps {
   children: ReactNode;
@@ -21,6 +22,11 @@ export function AppShell({ children }: AppShellProps) {
 
 function DesktopSidebar() {
   const [location] = useLocation();
+  const { isSignedIn } = useAuth();
+  const { user } = useUser();
+  const { signOut } = useClerk();
+
+  const basePath = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 
   const isRelationActive = location.startsWith("/relations/") && location !== "/relations/new";
   const relationIdMatch = location.match(/\/relations\/(\d+)/);
@@ -49,7 +55,7 @@ function DesktopSidebar() {
       </div>
 
       <nav className="flex-1 space-y-2">
-        {navItems.map((item) => {
+        {isSignedIn ? navItems.map((item) => {
           const isActive = item.exact ? location === item.href : location.startsWith(item.href);
           return (
             <Link
@@ -66,13 +72,58 @@ function DesktopSidebar() {
               {item.label}
             </Link>
           );
-        })}
+        }) : (
+          <div className="space-y-2">
+            <Link
+              href="/sign-in"
+              className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground transition-all"
+            >
+              Se connecter
+            </Link>
+            <Link
+              href="/sign-up"
+              className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground transition-all"
+            >
+              Créer un compte
+            </Link>
+          </div>
+        )}
       </nav>
-      
-      <div className="mt-auto pt-6">
-        <p className="text-xs text-muted-foreground/60">
-          Un espace sécurisé et chiffré.
-        </p>
+
+      <div className="mt-auto pt-6 border-t border-border/40 space-y-3">
+        {isSignedIn && user ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              {user.imageUrl ? (
+                <img
+                  src={user.imageUrl}
+                  alt="Avatar"
+                  className="h-8 w-8 rounded-full object-cover border border-border/40"
+                />
+              ) : (
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary">
+                  {(user.firstName?.[0] ?? user.emailAddresses?.[0]?.emailAddress?.[0] ?? '?').toUpperCase()}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">
+                  {user.firstName ? `${user.firstName} ${user.lastName ?? ''}`.trim() : user.emailAddresses?.[0]?.emailAddress ?? ''}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => signOut({ redirectUrl: basePath || '/' })}
+              className="flex items-center gap-2 w-full rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-black/5 hover:text-foreground transition-colors"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Se déconnecter
+            </button>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground/60">
+            Un espace sécurisé et chiffré.
+          </p>
+        )}
       </div>
     </aside>
   );
@@ -80,6 +131,9 @@ function DesktopSidebar() {
 
 function MobileNav() {
   const [location] = useLocation();
+  const { isSignedIn } = useAuth();
+
+  if (!isSignedIn) return null;
 
   const isRelationActive = location.startsWith("/relations/") && location !== "/relations/new";
   const relationIdMatch = location.match(/\/relations\/(\d+)/);
