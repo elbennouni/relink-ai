@@ -67,9 +67,28 @@ function broadcastToSession(relationId: number, data: object) {
   }
 }
 
-/** Normalise a JID to a plain phone number string */
+/**
+ * Normalise a JID to a plain phone number string.
+ *
+ * Recent Baileys versions include a device suffix before the @:
+ *   "33612345678:37@s.whatsapp.net"  →  "33612345678"   ✓
+ *   "33612345678@s.whatsapp.net"     →  "33612345678"   ✓
+ *   "82484930822267:35@lid"          →  ""  (LID — not a phone, caller should skip)
+ */
 function jidToPhone(jid: string): string {
-  return jid.replace(/@.*$/, "").replace(/[^0-9]/g, "");
+  const user = jid.split("@")[0].split(":")[0]; // strip @server and :device
+  return user.replace(/[^0-9]/g, "");
+}
+
+/**
+ * Loose phone-number comparison that ignores leading country codes / zeroes.
+ * Compares the last `N` digits of both numbers so "+33612345678" matches
+ * a contactPhone stored as "612345678" or "0612345678".
+ */
+function phonesMatch(a: string, b: string, significantDigits = 9): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.slice(-significantDigits) === b.slice(-significantDigits);
 }
 
 /** Download a WhatsApp media message and return a base64 data URL */
@@ -283,12 +302,18 @@ async function startSession(relationId: number, contactPhone?: string) {
     for (const msg of msgs) {
       if (!msg.message) continue;
       const jid = msg.key.remoteJid ?? "";
-      if (jid.endsWith("@g.us") || jid.endsWith("@broadcast")) continue;
+
+      // Skip groups, broadcasts, and LID device-identity JIDs (not chat messages)
+      if (jid.endsWith("@g.us") || jid.endsWith("@broadcast") || jid.endsWith("@lid")) continue;
 
       const isMe = msg.key.fromMe ?? false;
+
+      // jidToPhone now correctly strips :XX device suffix before extracting digits
       const chatPhone = jidToPhone(jid);
-      const senderJid = msg.key.participant ?? msg.key.remoteJid ?? "";
-      const senderPhone = jidToPhone(senderJid || (msg.key.remoteJid ?? ""));
+
+      // For group messages participant field carries the sender; for 1-on-1 use remoteJid
+      const senderRaw = msg.key.participant ?? msg.key.remoteJid ?? "";
+      const senderPhone = jidToPhone(senderRaw || jid);
 
       const sentAt = new Date(Number(msg.messageTimestamp) * 1000);
       if (isNaN(sentAt.getTime()) || sentAt.getFullYear() < 2000) continue;
@@ -298,25 +323,29 @@ async function startSession(relationId: number, contactPhone?: string) {
       const { content, mediaData } = extracted;
 
       if (isMe) {
-        // Own message — store in current relation (user is talking to this relation's contact)
+        // Own outgoing message — store in this relation if the chat's remote JID
+        // matches our configured contactPhone (or if no filter is set yet).
         const myContactPhone = session.contactPhone?.replace(/\D/g, "");
-        if (!myContactPhone || chatPhone === myContactPhone) {
+        if (!myContactPhone || phonesMatch(chatPhone, myContactPhone)) {
           await persistMessage(msg, relationId, true, senderPhone, content, mediaData, sentAt);
+        } else {
+          console.log(`[Baileys:${relationId}] Own msg skipped — chatPhone=${chatPhone} contactPhone=${myContactPhone}`);
         }
       } else {
         // Incoming message — route to the relation whose contactPhone matches chatPhone.
-        // Search ALL sessions (WhatsApp may deliver to any open web session).
+        // Search ALL sessions (WhatsApp may deliver the message to any open web session).
         let stored = false;
         for (const [relId, relSession] of sessions.entries()) {
           const cp = relSession.contactPhone?.replace(/\D/g, "");
-          if (cp && chatPhone === cp) {
-            console.log(`[Baileys:${relationId}→${relId}] Incoming from ${chatPhone}: "${content.slice(0, 60)}"`);
+          if (phonesMatch(chatPhone, cp ?? "")) {
+            console.log(`[Baileys:${relationId}→${relId}] Incoming from ${chatPhone} (matches ${cp}): "${content.slice(0, 60)}"`);
             await persistMessage(msg, relId, false, senderPhone, content, mediaData, sentAt);
             stored = true;
           }
         }
         if (!stored) {
-          console.log(`[Baileys:${relationId}] No relation matches incoming from ${chatPhone} (known: ${[...sessions.values()].map(s => s.contactPhone?.replace(/\D/g, "")).join(",")})`);
+          const known = [...sessions.values()].map(s => s.contactPhone?.replace(/\D/g, "") ?? "?").join(", ");
+          console.log(`[Baileys:${relationId}] ⚠ No relation matches incoming from chatPhone=${chatPhone} | known contactPhones: [${known}]`);
         }
       }
     }
