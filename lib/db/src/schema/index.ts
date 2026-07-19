@@ -7,3 +7,4 @@ export * from "./relation_phases";
 export * from "./agent_sessions";
 export * from "./agent_messages";
 export * from "./no_contact";
+export * from "./whatsapp_accounts";
