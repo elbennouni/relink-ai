@@ -5,6 +5,7 @@ import whatsappRouter from "./whatsapp";
 import memoryRouter from "./memory";
 import agentRouter from "./agent";
 import analysisRouter from "./analysis";
+import noContactRouter from "./no_contact";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(whatsappRouter);
 router.use(memoryRouter);
 router.use(agentRouter);
 router.use(analysisRouter);
+router.use(noContactRouter);
 
 export default router;

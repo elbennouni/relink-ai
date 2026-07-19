@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Home, MessageSquare, BrainCircuit, Settings } from "lucide-react";
+import { Home, MessageSquare, BrainCircuit, Settings, ShieldOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
 
@@ -32,6 +32,7 @@ function DesktopSidebar() {
       ? [
           { href: `/relations/${relationId}`, label: "Conversation", icon: MessageSquare, exact: true },
           { href: `/relations/${relationId}/memory`, label: "Mémoire", icon: BrainCircuit, exact: false },
+          { href: `/relations/${relationId}/no-contact`, label: "No Contact", icon: ShieldOff, exact: false },
         ]
       : []),
     { href: "/settings", label: "Paramètres", icon: Settings, exact: false },
@@ -89,6 +90,7 @@ function MobileNav() {
       ? [
           { href: `/relations/${relationId}`, label: "Conversation", icon: MessageSquare, exact: true },
           { href: `/relations/${relationId}/memory`, label: "Mémoire", icon: BrainCircuit, exact: false },
+          { href: `/relations/${relationId}/no-contact`, label: "No Contact", icon: ShieldOff, exact: false },
         ]
       : []),
     { href: "/settings", label: "Paramètres", icon: Settings, exact: false },

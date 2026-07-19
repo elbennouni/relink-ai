@@ -3,6 +3,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { Route, Switch, Router as WouterRouter } from 'wouter';
+import NoContact from './pages/NoContact';
 
 import { AppShell } from '@/components/layout/AppShell';
 import Home from '@/pages/Home';
@@ -21,6 +22,7 @@ function Router() {
       <Route path="/relations/new" component={CreateRelation} />
       <Route path="/relations/:id/import" component={ImportFlow} />
       <Route path="/relations/:id/memory" component={Memory} />
+      <Route path="/relations/:id/no-contact" component={NoContact} />
       <Route path="/relations/:id" component={Workspace} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
