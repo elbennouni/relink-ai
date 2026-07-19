@@ -71,7 +71,6 @@ export default function ImportFlow() {
     try {
       const res = await fetch(`/api/relations/${relationId}/memory/build`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
       });
 
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);

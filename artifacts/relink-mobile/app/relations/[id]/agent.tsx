@@ -16,6 +16,7 @@ import {
 } from '@workspace/api-client-react';
 import * as Haptics from 'expo-haptics';
 import { fetch } from 'expo/fetch';
+import { useAuth } from '@clerk/expo';
 
 const QUICK_CHIPS = [
   'Analyse le dernier message',
@@ -51,6 +52,7 @@ export default function AgentScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
 
+  const { getToken } = useAuth();
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -115,11 +117,15 @@ export default function AgentScreen() {
     setIsStreaming(true);
 
     try {
+      const token = await getToken();
       const response = await fetch(
         `https://${process.env.EXPO_PUBLIC_DOMAIN}/api/relations/${relationId}/agent/sessions/${sessionId}/chat`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({ message: trimmed }),
         }
       );

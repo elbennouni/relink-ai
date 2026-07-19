@@ -66,12 +66,16 @@ export default function SignInScreen() {
     }
   };
 
+  const [ssoError, setSsoError] = React.useState('');
+
   const handleGoogle = useCallback(async () => {
     try {
       setSsoLoading(true);
+      setSsoError('');
+      const redirectUrl = AuthSession.makeRedirectUri({ scheme: 'relink-mobile' });
       const { createdSessionId, setActive } = await startSSOFlow({
         strategy: 'oauth_google',
-        redirectUrl: AuthSession.makeRedirectUri(),
+        redirectUrl,
       });
       if (createdSessionId) {
         await setActive!({
@@ -80,9 +84,12 @@ export default function SignInScreen() {
             router.replace('/(tabs)');
           },
         });
+      } else {
+        setSsoError('Connexion Google annulée.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Google SSO error:', err);
+      setSsoError(err?.message ?? 'Erreur lors de la connexion Google.');
     } finally {
       setSsoLoading(false);
     }
@@ -143,6 +150,7 @@ export default function SignInScreen() {
               ? <ActivityIndicator color={c.foreground} />
               : <Text style={s.googleBtnText}>Continuer avec Google</Text>}
           </Pressable>
+          {!!ssoError && <Text style={s.error}>{ssoError}</Text>}
 
           <View style={s.dividerRow}>
             <View style={s.dividerLine} />

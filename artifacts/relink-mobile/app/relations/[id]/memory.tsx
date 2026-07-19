@@ -10,6 +10,7 @@ import { useColors } from '@/hooks/useColors';
 import { useGetRelation, useGetMemory, useGetRelationPhases } from '@workspace/api-client-react';
 import * as Haptics from 'expo-haptics';
 import { fetch } from 'expo/fetch';
+import { useAuth } from '@clerk/expo';
 
 function parseSSE(chunk: string): { type?: string; progress?: number; message?: string; done?: boolean } {
   for (const line of chunk.split('\n')) {
@@ -43,6 +44,7 @@ export default function MemoryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
 
+  const { getToken } = useAuth();
   const [building, setBuilding] = useState(false);
   const [buildProgress, setBuildProgress] = useState(0);
   const [buildStatus, setBuildStatus] = useState('');
@@ -66,9 +68,15 @@ export default function MemoryScreen() {
     setBuildStatus('Analyse des messages…');
 
     try {
+      const token = await getToken();
       const response = await fetch(
         `https://${process.env.EXPO_PUBLIC_DOMAIN}/api/relations/${relationId}/memory/build`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+        {
+          method: 'POST',
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        }
       );
 
       const reader = response.body!.getReader();
