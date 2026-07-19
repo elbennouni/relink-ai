@@ -35,14 +35,7 @@
       ],
       "expo-font",
       "expo-web-browser",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/images/icon.png",
-          "color": "#C97B3A",
-          "sounds": []
-        }
-      ]
+      "./plugins/withPackagingFix"
     ],
     "extra": {
       "eas": {
