@@ -8,3 +8,4 @@ export * from "./agent_sessions";
 export * from "./agent_messages";
 export * from "./no_contact";
 export * from "./whatsapp_accounts";
+export * from "./whatsapp_lid_mappings";

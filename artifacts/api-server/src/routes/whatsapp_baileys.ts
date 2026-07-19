@@ -12,7 +12,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import type { WAMessage, ConnectionState } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
-import { db, whatsappMessagesTable, whatsappAccountsTable } from "@workspace/db";
+import { db, whatsappMessagesTable, whatsappAccountsTable, whatsappLidMappingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import path from "path";
 import fs from "fs";
@@ -35,12 +35,41 @@ const sessions = new Map<number, Session>();
 const SESSIONS_DIR = path.resolve(process.cwd(), ".baileys-sessions");
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 
-// ─── LID ↔ phone mapping (shared across all sessions) ────────────────────────
+// ─── LID ↔ phone mapping (shared across all sessions, persisted in DB) ────────
 // WhatsApp now delivers messages using "LID" device identifiers instead of phone
-// JIDs. We build this map from contacts.upsert events (which expose both the
-// phone JID and the LID for each contact) so we can resolve LIDs back to phone
-// numbers when routing incoming messages.
+// JIDs. We build this map from contacts.upsert events and from outgoing messages,
+// and persist it to the DB so it survives server restarts.
 const lidToPhone = new Map<string, string>(); // "8380068413573" → "33612345678"
+
+/** Load all known LID→phone pairs from the DB into the in-memory map. */
+async function loadLidMappings() {
+  try {
+    const rows = await db.select().from(whatsappLidMappingsTable);
+    for (const row of rows) {
+      lidToPhone.set(row.lid, row.phone);
+    }
+    if (rows.length > 0) {
+      console.log(`[Baileys] Loaded ${rows.length} LID↔phone mappings from DB`);
+    }
+  } catch (err) {
+    console.warn("[Baileys] Could not load LID mappings from DB:", err);
+  }
+}
+
+/** Persist a single LID→phone pair to the DB (upsert). */
+async function saveLidMapping(lid: string, phone: string) {
+  try {
+    await db
+      .insert(whatsappLidMappingsTable)
+      .values({ lid, phone, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: whatsappLidMappingsTable.lid,
+        set: { phone, updatedAt: new Date() },
+      });
+  } catch (err) {
+    console.warn(`[Baileys] Could not save LID mapping ${lid}→${phone}:`, err);
+  }
+}
 
 function registerContactJids(contact: { id?: string; lid?: string }) {
   const phoneJid = contact.id ?? "";
@@ -48,8 +77,9 @@ function registerContactJids(contact: { id?: string; lid?: string }) {
   if (!phoneJid.includes("@s.whatsapp.net") || !lidJid.includes("@lid")) return;
   const phone = phoneJid.split("@")[0].split(":")[0];
   const lid   = lidJid.split("@")[0].split(":")[0];
-  if (phone && lid) {
+  if (phone && lid && !lidToPhone.has(lid)) {
     lidToPhone.set(lid, phone);
+    saveLidMapping(lid, phone); // fire-and-forget, no await needed
   }
 }
 
@@ -378,7 +408,8 @@ async function startSession(relationId: number, contactPhone?: string) {
         const myContactPhone = session.contactPhone?.replace(/\D/g, "");
         if (isMe && myContactPhone && !lidToPhone.has(lidUser)) {
           lidToPhone.set(lidUser, myContactPhone);
-          console.log(`[Baileys:${relationId}] Learned LID from outgoing: ${lidUser} → ${myContactPhone}`);
+          saveLidMapping(lidUser, myContactPhone); // persist to DB
+          console.log(`[Baileys:${relationId}] Learned LID from outgoing: ${lidUser} → ${myContactPhone} (saved to DB)`);
         }
       }
 
@@ -440,6 +471,10 @@ async function startSession(relationId: number, contactPhone?: string) {
 
 // ─── Auto-restore sessions on startup ────────────────────────────────────────
 (async () => {
+  // Load persisted LID↔phone mappings first so they're available before any
+  // session connects and receives messages.
+  await loadLidMappings();
+
   try {
     const dirs = fs.readdirSync(SESSIONS_DIR).filter((d) => /^\d+$/.test(d));
     for (const dir of dirs) {

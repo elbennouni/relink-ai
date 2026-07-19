@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { useQueryClient } from '@tanstack/react-query';
+import { useAuth, useUser } from '@clerk/expo';
 
 function SettingRow({
   icon,
@@ -61,8 +62,28 @@ export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const { signOut } = useAuth();
+  const { user } = useUser();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 : insets.bottom;
+
+  const handleSignOut = () => {
+    Alert.alert(
+      'Déconnexion',
+      'Êtes-vous sûr de vouloir vous déconnecter ?',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Déconnexion',
+          style: 'destructive',
+          onPress: async () => {
+            queryClient.clear();
+            await signOut();
+          },
+        },
+      ]
+    );
+  };
 
   const handleClearCache = () => {
     Alert.alert(
@@ -89,6 +110,24 @@ export default function SettingsScreen() {
         contentContainerStyle={[styles.content, { paddingBottom: bottomPad + 24 }]}
         showsVerticalScrollIndicator={false}
       >
+        {user && (
+          <Section title="COMPTE" colors={colors}>
+            <SettingRow
+              icon="user"
+              label="Connecté en tant que"
+              value={user.primaryEmailAddress?.emailAddress ?? user.id}
+              colors={colors}
+            />
+            <SettingRow
+              icon="log-out"
+              label="Se déconnecter"
+              onPress={handleSignOut}
+              colors={colors}
+              destructive
+            />
+          </Section>
+        )}
+
         <Section title="CONFIDENTIALITÉ" colors={colors}>
           <SettingRow
             icon="shield"
