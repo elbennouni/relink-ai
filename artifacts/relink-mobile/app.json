@@ -46,7 +46,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "REPLACE_WITH_YOUR_EAS_PROJECT_ID"
+        "projectId": "2694d1c3-db72-4f24-85eb-e05d470fb2b1"
       }
     },
     "experiments": {
