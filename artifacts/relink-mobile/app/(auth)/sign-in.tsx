@@ -37,16 +37,23 @@ export default function SignInScreen() {
 
   const handleSignIn = async () => {
     const { error } = await signIn.password({ emailAddress: email, password });
-    if (error) return;
+    if (error) {
+      console.error('Sign-in error:', JSON.stringify(error, null, 2));
+      return;
+    }
     if (signIn.status === 'complete') {
       await signIn.finalize({
-        navigate: ({ session, decorateUrl }) => {
-          if (session?.currentTask) return;
+        navigate: ({ decorateUrl }) => {
           const url = decorateUrl('/');
-          if (url.startsWith('http')) return;
-          router.replace('/(tabs)');
+          if (url.startsWith('http')) {
+            router.replace('/(tabs)');
+          } else {
+            router.replace('/(tabs)');
+          }
         },
       });
+    } else if (signIn.status === 'needs_client_trust') {
+      await signIn.mfa.sendEmailCode();
     }
   };
 
@@ -54,10 +61,7 @@ export default function SignInScreen() {
     await signIn.mfa.verifyEmailCode({ code: verifyCode });
     if (signIn.status === 'complete') {
       await signIn.finalize({
-        navigate: ({ session }) => {
-          if (session?.currentTask) return;
-          router.replace('/(tabs)');
-        },
+        navigate: () => router.replace('/(tabs)'),
       });
     }
   };
@@ -72,8 +76,7 @@ export default function SignInScreen() {
       if (createdSessionId) {
         await setActive!({
           session: createdSessionId,
-          navigate: async ({ session }) => {
-            if (session?.currentTask) return;
+          navigate: async () => {
             router.replace('/(tabs)');
           },
         });
@@ -188,7 +191,7 @@ export default function SignInScreen() {
 
           <View style={s.footerRow}>
             <Text style={s.footerText}>Pas encore de compte ? </Text>
-            <Link href="/(auth)/sign-up">
+            <Link href="/sign-up">
               <Text style={s.link}>Créer un compte</Text>
             </Link>
           </View>

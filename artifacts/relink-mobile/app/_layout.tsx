@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -13,12 +13,13 @@ import {
 } from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { ClerkProvider, ClerkLoaded } from '@clerk/expo';
+import { ClerkProvider, ClerkLoaded, useAuth } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
-import { setBaseUrl } from '@workspace/api-client-react';
+import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 
-// Set API base URL at module load — same as before
-setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
+// Set API base URL outside component — called once at module load
+const domain = process.env.EXPO_PUBLIC_DOMAIN;
+if (domain) setBaseUrl(`https://${domain}`);
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 const proxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined;
@@ -30,6 +31,36 @@ const queryClient = new QueryClient({
     queries: { staleTime: 30_000, retry: 1 },
   },
 });
+
+/**
+ * Registers the Clerk bearer token getter globally so every API call
+ * includes the Authorization header. Also clears the QueryClient cache
+ * whenever the signed-in state changes — preventing one user from seeing
+ * another user's cached data after sign-out / sign-in on the same device.
+ *
+ * Must live inside <ClerkLoaded> so useAuth() is available.
+ */
+function ClerkAuthSync() {
+  const { isSignedIn, getToken } = useAuth();
+  const prevSignedInRef = useRef<boolean | null>(null);
+
+  // Register (or clear) the bearer token getter whenever auth state changes.
+  // Returns null when signed out so no Authorization header is sent.
+  useEffect(() => {
+    setAuthTokenGetter(isSignedIn ? () => getToken() : null);
+  }, [getToken, isSignedIn]);
+
+  // Clear ALL cached query data when the sign-in state flips.
+  // This prevents user A's relations/messages from leaking to user B.
+  useEffect(() => {
+    if (prevSignedInRef.current !== null && prevSignedInRef.current !== isSignedIn) {
+      queryClient.clear();
+    }
+    prevSignedInRef.current = isSignedIn ?? false;
+  }, [isSignedIn]);
+
+  return null;
+}
 
 function RootLayoutNav() {
   return (
@@ -71,8 +102,14 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache} proxyUrl={proxyUrl}>
+    <ClerkProvider
+      publishableKey={publishableKey}
+      tokenCache={tokenCache}
+      proxyUrl={proxyUrl}
+    >
       <ClerkLoaded>
+        {/* Registers bearer token getter and clears cache on auth changes — must be inside ClerkLoaded */}
+        <ClerkAuthSync />
         <SafeAreaProvider>
           <ErrorBoundary>
             <QueryClientProvider client={queryClient}>

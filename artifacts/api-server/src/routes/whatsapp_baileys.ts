@@ -137,14 +137,41 @@ function jidToPhone(jid: string): string {
 }
 
 /**
- * Loose phone-number comparison that ignores leading country codes / zeroes.
- * Compares the last `N` digits of both numbers so "+33612345678" matches
- * a contactPhone stored as "612345678" or "0612345678".
+ * Strict phone-number comparison that handles local vs. international formats.
+ *
+ * Two numbers match when, after digit-only normalization and leading-zero
+ * stripping, either:
+ *   1. They are identical, OR
+ *   2. One is a proper suffix of the other AND the extra prefix on the longer
+ *      number is 1–3 digits (a plausible country-code addition).
+ *
+ * This prevents the false-positive collisions that "last-N-digits" matching
+ * can produce across different country codes (e.g. +1 and +33 numbers that
+ * happen to share their last 9 digits).
+ *
+ * Minimum 7 significant digits required to avoid short-number false positives.
  */
-function phonesMatch(a: string, b: string, significantDigits = 9): boolean {
+function phonesMatch(a: string, b: string): boolean {
   if (!a || !b) return false;
-  if (a === b) return true;
-  return a.slice(-significantDigits) === b.slice(-significantDigits);
+  const na = a.replace(/[^0-9]/g, "");
+  const nb = b.replace(/[^0-9]/g, "");
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+
+  // Strip leading zeros (local-format prefix) before suffix comparison so that
+  // "0612345678" (French local) aligns with "33612345678" (international JID).
+  const naS = na.replace(/^0+/, "");
+  const nbS = nb.replace(/^0+/, "");
+  if (naS === nbS) return true;
+
+  const shorter = naS.length <= nbS.length ? naS : nbS;
+  const longer  = naS.length <= nbS.length ? nbS : naS;
+  if (shorter.length < 7) return false;
+  if (!longer.endsWith(shorter)) return false;
+
+  // The extra prefix must look like a country code (1–3 digits).
+  const prefix = longer.slice(0, longer.length - shorter.length);
+  return prefix.length >= 1 && prefix.length <= 3;
 }
 
 /** Download a WhatsApp media message and return a base64 data URL */

@@ -1,7 +1,14 @@
 import React from 'react';
 import { Stack } from 'expo-router';
+import { Redirect } from 'expo-router';
+import { useAuth } from '@clerk/expo';
 
 export default function RelationLayout() {
+  const { isSignedIn } = useAuth();
+
+  // Guard: deep-link into a relation without being signed in → sign-in screen
+  if (!isSignedIn) return <Redirect href="/sign-in" />;
+
   return (
     <Stack>
       <Stack.Screen name="index" options={{ headerShown: false }} />

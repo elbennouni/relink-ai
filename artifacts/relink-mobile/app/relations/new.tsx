@@ -3,13 +3,15 @@ import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   Platform, ActivityIndicator, KeyboardAvoidingView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 import { useCreateRelation } from '@workspace/api-client-react';
 import * as Haptics from 'expo-haptics';
+import { useAuth } from '@clerk/expo';
 
 export default function NewRelationScreen() {
+  const { isSignedIn } = useAuth();
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -21,6 +23,9 @@ export default function NewRelationScreen() {
   const otherRef = useRef<TextInput>(null);
 
   const createMutation = useCreateRelation();
+
+  // Guard after all hooks — redirect unsigned-in users to sign-in
+  if (!isSignedIn) return <Redirect href="/sign-in" />;
 
   const canSubmit = name.trim() && participantMe.trim() && participantOther.trim();
 

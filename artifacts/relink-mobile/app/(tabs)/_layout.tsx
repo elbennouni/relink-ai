@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Platform, StyleSheet, useColorScheme, View } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import { Feather } from '@expo/vector-icons';
@@ -8,8 +8,10 @@ import { Redirect, Tabs } from 'expo-router';
 import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
 import { useAuth } from '@clerk/expo';
-import { setAuthTokenGetter } from '@workspace/api-client-react';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+
+// NOTE: setAuthTokenGetter is handled globally by <ClerkAuthSync> in app/_layout.tsx.
+// No need to register it here.
 
 function NativeTabLayout() {
   return (
@@ -88,18 +90,15 @@ function ClassicTabLayout() {
 }
 
 export default function TabLayout() {
-  const { isSignedIn, getToken } = useAuth();
-
-  // Wire the bearer token for every API call (mobile has no cookie jar)
-  useEffect(() => {
-    setAuthTokenGetter(() => getToken());
-  }, [getToken]);
+  const { isSignedIn } = useAuth();
 
   // Register device for push notifications
   usePushNotifications();
 
-  // Not signed in — send to sign-in screen
-  if (!isSignedIn) return <Redirect href="/(auth)/sign-in" />;
+
+  // Redirect unsigned-in users to the sign-in screen.
+  // Use the canonical URL /sign-in (group prefix is stripped in Expo Router).
+  if (!isSignedIn) return <Redirect href="/sign-in" />;
 
   if (isLiquidGlassAvailable()) return <NativeTabLayout />;
   return <ClassicTabLayout />;

@@ -21,18 +21,18 @@ export default function SignUpScreen() {
 
   const handleSignUp = async () => {
     const { error } = await signUp.password({ emailAddress: email, password });
-    if (error) return;
-    if (!error) await signUp.verifications.sendEmailCode();
+    if (error) {
+      console.error('Sign-up error:', JSON.stringify(error, null, 2));
+      return;
+    }
+    await signUp.verifications.sendEmailCode();
   };
 
   const handleVerify = async () => {
     await signUp.verifications.verifyEmailCode({ code });
     if (signUp.status === 'complete') {
       await signUp.finalize({
-        navigate: ({ session }) => {
-          if (session?.currentTask) return;
-          router.replace('/(tabs)');
-        },
+        navigate: () => router.replace('/(tabs)'),
       });
     }
   };
@@ -57,13 +57,14 @@ export default function SignUpScreen() {
               placeholder="Code de vérification"
               placeholderTextColor={c.mutedForeground}
               keyboardType="numeric"
+              autoComplete="one-time-code"
               autoFocus
             />
             {errors.fields.code && <Text style={s.error}>{errors.fields.code.message}</Text>}
             <Pressable
-              style={[s.btn, fetchStatus === 'fetching' && s.btnDisabled]}
+              style={[s.btn, (fetchStatus === 'fetching' || !code) && s.btnDisabled]}
               onPress={handleVerify}
-              disabled={fetchStatus === 'fetching'}
+              disabled={fetchStatus === 'fetching' || !code}
             >
               {fetchStatus === 'fetching'
                 ? <ActivityIndicator color={c.primaryForeground} />
@@ -102,6 +103,8 @@ export default function SignUpScreen() {
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
+            autoComplete="email"
+            textContentType="emailAddress"
           />
           {errors.fields.emailAddress && (
             <Text style={s.error}>{errors.fields.emailAddress.message}</Text>
@@ -115,6 +118,8 @@ export default function SignUpScreen() {
             placeholder="8 caractères minimum"
             placeholderTextColor={c.mutedForeground}
             secureTextEntry
+            autoComplete="new-password"
+            textContentType="newPassword"
           />
           {errors.fields.password && (
             <Text style={s.error}>{errors.fields.password.message}</Text>
@@ -132,7 +137,7 @@ export default function SignUpScreen() {
 
           <View style={s.footerRow}>
             <Text style={s.footerText}>Déjà un compte ? </Text>
-            <Link href="/(auth)/sign-in">
+            <Link href="/sign-in">
               <Text style={s.link}>Se connecter</Text>
             </Link>
           </View>
