@@ -14,9 +14,16 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.relinkapp.mobile",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
-    "android": {},
+    "android": {
+      "package": "com.relinkapp.mobile",
+      "googleServicesFile": "./google-services.json"
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
@@ -28,8 +35,21 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#C97B3A",
+          "sounds": []
+        }
+      ]
     ],
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_YOUR_EAS_PROJECT_ID"
+      }
+    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

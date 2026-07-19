@@ -14,6 +14,7 @@ import type { WAMessage, ConnectionState } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import { db, whatsappMessagesTable, whatsappAccountsTable, whatsappLidMappingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { notifyRelationOwner } from "../lib/pushNotifications";
 import path from "path";
 import fs from "fs";
 import { openai } from "@workspace/integrations-openai-ai-server";
@@ -355,7 +356,7 @@ async function startSession(relationId: number, contactPhone?: string) {
       .update(`${msg.key.id}:${targetRelationId}`)
       .digest("hex");
     try {
-      await db
+      const result = await db
         .insert(whatsappMessagesTable)
         .values({
           relationId: targetRelationId,
@@ -367,7 +368,19 @@ async function startSession(relationId: number, contactPhone?: string) {
           contentHash: hash,
           ...(mediaData ? { mediaData } : {}),
         })
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        .returning({ id: whatsappMessagesTable.id });
+
+      // Send push notification for incoming messages (fromMe=false) that were actually inserted
+      if (!isMe && result.length > 0) {
+        const preview = content.length > 80 ? content.slice(0, 80) + "…" : content;
+        notifyRelationOwner(
+          targetRelationId,
+          `Nouveau message`,
+          preview,
+          { relationId: targetRelationId },
+        ).catch(() => {}); // fire-and-forget
+      }
     } catch { /* ignore constraint errors */ }
   }
 

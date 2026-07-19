@@ -11,6 +11,7 @@ import whatsappBaileysRouter from "./whatsapp_baileys";
 import transcribeRouter from "./transcribe";
 import suggestRepliesRouter from "./suggest_replies";
 import analyzeIncomingRouter from "./analyze_incoming";
+import pushTokensRouter from "./push_tokens";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireRelationOwnership } from "../middlewares/requireRelationOwnership";
 
@@ -40,5 +41,6 @@ router.use(whatsappBaileysRouter);
 router.use(transcribeRouter);
 router.use(suggestRepliesRouter);
 router.use(analyzeIncomingRouter);
+router.use(pushTokensRouter);
 
 export default router;
