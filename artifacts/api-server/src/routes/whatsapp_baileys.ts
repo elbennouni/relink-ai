@@ -35,6 +35,24 @@ const sessions = new Map<number, Session>();
 const SESSIONS_DIR = path.resolve(process.cwd(), ".baileys-sessions");
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 
+// ─── LID ↔ phone mapping (shared across all sessions) ────────────────────────
+// WhatsApp now delivers messages using "LID" device identifiers instead of phone
+// JIDs. We build this map from contacts.upsert events (which expose both the
+// phone JID and the LID for each contact) so we can resolve LIDs back to phone
+// numbers when routing incoming messages.
+const lidToPhone = new Map<string, string>(); // "8380068413573" → "33612345678"
+
+function registerContactJids(contact: { id?: string; lid?: string }) {
+  const phoneJid = contact.id ?? "";
+  const lidJid   = contact.lid ?? "";
+  if (!phoneJid.includes("@s.whatsapp.net") || !lidJid.includes("@lid")) return;
+  const phone = phoneJid.split("@")[0].split(":")[0];
+  const lid   = lidJid.split("@")[0].split(":")[0];
+  if (phone && lid) {
+    lidToPhone.set(lid, phone);
+  }
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function sessionDir(relationId: number) {
@@ -68,15 +86,22 @@ function broadcastToSession(relationId: number, data: object) {
 }
 
 /**
- * Normalise a JID to a plain phone number string.
+ * Resolve a JID (any format) to a plain phone-number string.
  *
- * Recent Baileys versions include a device suffix before the @:
- *   "33612345678:37@s.whatsapp.net"  →  "33612345678"   ✓
- *   "33612345678@s.whatsapp.net"     →  "33612345678"   ✓
- *   "82484930822267:35@lid"          →  ""  (LID — not a phone, caller should skip)
+ * Handles all three modern WhatsApp JID formats:
+ *   "33612345678@s.whatsapp.net"    →  "33612345678"
+ *   "33612345678:37@s.whatsapp.net" →  "33612345678"  (device suffix stripped)
+ *   "8380068413573@lid"             →  "33612345678"  (LID resolved via contacts map)
+ *   "8380068413573:0@lid"           →  "33612345678"  (LID with device suffix)
+ *
+ * Returns "" when a LID cannot yet be resolved (map not yet populated).
  */
 function jidToPhone(jid: string): string {
-  const user = jid.split("@")[0].split(":")[0]; // strip @server and :device
+  const user = jid.split("@")[0].split(":")[0]; // strip @server and :device suffix
+  if (jid.includes("@lid")) {
+    // LID: look up the corresponding phone number from the contacts map
+    return lidToPhone.get(user) ?? "";
+  }
   return user.replace(/[^0-9]/g, "");
 }
 
@@ -189,6 +214,28 @@ async function startSession(relationId: number, contactPhone?: string) {
   session.socket = sock;
 
   sock.ev.on("creds.update", saveCreds);
+
+  // ── Build LID ↔ phone mapping from contact list ───────────────────────────
+  // WhatsApp delivers messages with LID JIDs in newer versions. contacts.upsert
+  // fires on connect with the full contact list, each entry having both the
+  // phone JID (id) and LID (lid) when available.
+  sock.ev.on("contacts.upsert", (contacts) => {
+    let mapped = 0;
+    for (const contact of contacts) {
+      const before = lidToPhone.size;
+      registerContactJids(contact as { id?: string; lid?: string });
+      if (lidToPhone.size > before) mapped++;
+    }
+    if (mapped > 0) {
+      console.log(`[Baileys:${relationId}] contacts.upsert: mapped ${mapped} new LID↔phone pairs (total: ${lidToPhone.size})`);
+    }
+  });
+
+  sock.ev.on("contacts.update", (updates) => {
+    for (const update of updates) {
+      registerContactJids(update as { id?: string; lid?: string });
+    }
+  });
 
   sock.ev.on("connection.update", (update: Partial<ConnectionState>) => {
     const { connection, lastDisconnect, qr } = update;
@@ -303,12 +350,12 @@ async function startSession(relationId: number, contactPhone?: string) {
       if (!msg.message) continue;
       const jid = msg.key.remoteJid ?? "";
 
-      // Skip groups, broadcasts, and LID device-identity JIDs (not chat messages)
-      if (jid.endsWith("@g.us") || jid.endsWith("@broadcast") || jid.endsWith("@lid")) continue;
+      // Skip groups and broadcasts — never skip @lid (real chat messages use LID in new WA)
+      if (jid.endsWith("@g.us") || jid.endsWith("@broadcast")) continue;
 
       const isMe = msg.key.fromMe ?? false;
 
-      // jidToPhone now correctly strips :XX device suffix before extracting digits
+      // jidToPhone resolves LIDs via the contacts map, strips :XX device suffix
       const chatPhone = jidToPhone(jid);
 
       // For group messages participant field carries the sender; for 1-on-1 use remoteJid
@@ -322,30 +369,55 @@ async function startSession(relationId: number, contactPhone?: string) {
       if (!extracted) continue;
       const { content, mediaData } = extracted;
 
+      // ── Learn LID → phone mapping from outgoing messages ─────────────────────
+      // When the user sends a message (fromMe=true) and the remoteJid is a @lid,
+      // we know that LID corresponds to this session's contactPhone. Record it
+      // immediately so subsequent incoming messages from that LID can be routed.
+      if (jid.includes("@lid") && chatPhone === "") {
+        const lidUser = jid.split("@")[0].split(":")[0];
+        const myContactPhone = session.contactPhone?.replace(/\D/g, "");
+        if (isMe && myContactPhone && !lidToPhone.has(lidUser)) {
+          lidToPhone.set(lidUser, myContactPhone);
+          console.log(`[Baileys:${relationId}] Learned LID from outgoing: ${lidUser} → ${myContactPhone}`);
+        }
+      }
+
       if (isMe) {
         // Own outgoing message — store in this relation if the chat's remote JID
         // matches our configured contactPhone (or if no filter is set yet).
         const myContactPhone = session.contactPhone?.replace(/\D/g, "");
-        if (!myContactPhone || phonesMatch(chatPhone, myContactPhone)) {
+        const resolvedPhone = jidToPhone(jid); // re-resolve after possible map update above
+        if (!myContactPhone || resolvedPhone === "" || phonesMatch(resolvedPhone, myContactPhone)) {
+          // resolvedPhone === "" means LID not yet resolved — store optimistically
           await persistMessage(msg, relationId, true, senderPhone, content, mediaData, sentAt);
         } else {
-          console.log(`[Baileys:${relationId}] Own msg skipped — chatPhone=${chatPhone} contactPhone=${myContactPhone}`);
+          console.log(`[Baileys:${relationId}] Own msg skipped — chatPhone=${resolvedPhone} contactPhone=${myContactPhone}`);
         }
       } else {
         // Incoming message — route to the relation whose contactPhone matches chatPhone.
         // Search ALL sessions (WhatsApp may deliver the message to any open web session).
         let stored = false;
-        for (const [relId, relSession] of sessions.entries()) {
-          const cp = relSession.contactPhone?.replace(/\D/g, "");
-          if (phonesMatch(chatPhone, cp ?? "")) {
-            console.log(`[Baileys:${relationId}→${relId}] Incoming from ${chatPhone} (matches ${cp}): "${content.slice(0, 60)}"`);
-            await persistMessage(msg, relId, false, senderPhone, content, mediaData, sentAt);
-            stored = true;
+        const resolvedPhone = jidToPhone(jid); // may now be resolved after learn step
+
+        if (resolvedPhone === "") {
+          // LID not yet in contacts map — store in current session as best effort
+          console.log(`[Baileys:${relationId}] ⚠ LID ${jid} not yet resolved, storing in current relation`);
+          await persistMessage(msg, relationId, false, senderPhone, content, mediaData, sentAt);
+          stored = true;
+        } else {
+          for (const [relId, relSession] of sessions.entries()) {
+            const cp = relSession.contactPhone?.replace(/\D/g, "");
+            if (phonesMatch(resolvedPhone, cp ?? "")) {
+              console.log(`[Baileys:${relationId}→${relId}] Incoming from ${resolvedPhone} (matches ${cp}): "${content.slice(0, 60)}"`);
+              await persistMessage(msg, relId, false, senderPhone, content, mediaData, sentAt);
+              stored = true;
+            }
           }
         }
+
         if (!stored) {
           const known = [...sessions.values()].map(s => s.contactPhone?.replace(/\D/g, "") ?? "?").join(", ");
-          console.log(`[Baileys:${relationId}] ⚠ No relation matches incoming from chatPhone=${chatPhone} | known contactPhones: [${known}]`);
+          console.log(`[Baileys:${relationId}] ⚠ No match — resolvedPhone=${resolvedPhone} jid=${jid} | known: [${known}] | lidMap: ${lidToPhone.size}`);
         }
       }
     }
