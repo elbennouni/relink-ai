@@ -7,6 +7,7 @@ import agentRouter from "./agent";
 import analysisRouter from "./analysis";
 import noContactRouter from "./no_contact";
 import whatsappWebhookRouter from "./whatsapp_webhook";
+import whatsappBaileysRouter from "./whatsapp_baileys";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(agentRouter);
 router.use(analysisRouter);
 router.use(noContactRouter);
 router.use(whatsappWebhookRouter);
+router.use(whatsappBaileysRouter);
 
 export default router;

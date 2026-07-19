@@ -1,56 +1,215 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams } from "wouter";
 import { useGetRelation } from "@workspace/api-client-react";
 import {
   Smartphone, CheckCircle2, Loader2, Trash2, Copy, ExternalLink,
-  ShieldCheck, Mic, Zap, Info
+  ShieldCheck, Mic, Zap, Info, QrCode, Building2, RefreshCw, Wifi, WifiOff
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
-type Config = {
-  configured: boolean;
-  phoneNumberId?: string;
-  contactPhone?: string;
-};
+type Tab = "qr" | "business";
 
-type FormState = {
-  phoneNumberId: string;
-  accessToken: string;
-  businessAccountId: string;
-  contactPhone: string;
-};
+// ─── QR Code Tab ─────────────────────────────────────────────────────────────
 
-export default function WhatsAppConfig() {
-  const params = useParams<{ id: string }>();
-  const relationId = Number(params.id);
+function QRTab({ relationId, relationName }: { relationId: number; relationName: string }) {
   const { toast } = useToast();
-  const { data: relation } = useGetRelation(relationId, { query: { enabled: !!relationId } });
+  const [status, setStatus] = useState<"none" | "connecting" | "qr" | "connected" | "disconnected">("none");
+  const [qrData, setQrData] = useState<string | null>(null);
+  const [contactPhone, setContactPhone] = useState("");
+  const [savedContact, setSavedContact] = useState<string | undefined>();
+  const [disconnecting, setDisconnecting] = useState(false);
+  const sseRef = useRef<EventSource | null>(null);
 
-  const [config, setConfig] = useState<Config | null>(null);
+  // Check initial status
+  useEffect(() => {
+    fetch(`/api/relations/${relationId}/whatsapp/status`)
+      .then((r) => r.json())
+      .then((d) => {
+        setStatus(d.status ?? "none");
+        if (d.contactPhone) setSavedContact(d.contactPhone);
+        // Auto-reconnect if previously connected
+        if (d.status === "connected") setStatus("connected");
+        if (d.status === "connecting" || d.status === "qr") startSSE();
+      })
+      .catch(() => {});
+  }, [relationId]);
+
+  const startSSE = (phone?: string) => {
+    sseRef.current?.close();
+    setQrData(null);
+    setStatus("connecting");
+
+    const url = `/api/relations/${relationId}/whatsapp/qr${phone ? `?contactPhone=${encodeURIComponent(phone)}` : ""}`;
+    const es = new EventSource(url);
+    sseRef.current = es;
+
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "qr") {
+          setStatus("qr");
+          setQrData(data.data);
+        } else if (data.type === "connected") {
+          setStatus("connected");
+          setQrData(null);
+          es.close();
+          toast({ title: "WhatsApp connecté ✓", description: "Les messages arrivent en temps réel." });
+        } else if (data.type === "disconnected") {
+          setStatus(data.loggedOut ? "none" : "disconnected");
+          setQrData(null);
+          es.close();
+        }
+      } catch { /* ignore */ }
+    };
+
+    es.onerror = () => {
+      es.close();
+      if (status !== "connected") setStatus("disconnected");
+    };
+  };
+
+  const handleConnect = () => {
+    const phone = contactPhone.replace(/\D/g, "");
+    if (phone) setSavedContact(phone);
+    startSSE(phone || undefined);
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Déconnecter ce compte WhatsApp ? La session sera supprimée.")) return;
+    setDisconnecting(true);
+    sseRef.current?.close();
+    try {
+      await fetch(`/api/relations/${relationId}/whatsapp/disconnect-qr`, { method: "POST" });
+      setStatus("none");
+      setQrData(null);
+      setSavedContact(undefined);
+      setContactPhone("");
+      toast({ title: "Déconnecté" });
+    } catch {
+      toast({ title: "Erreur", variant: "destructive" });
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
+  useEffect(() => () => { sseRef.current?.close(); }, []);
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-muted/40 rounded-xl p-4 text-sm space-y-2">
+        <p className="font-semibold flex items-center gap-2"><QrCode className="h-4 w-4 text-primary" /> Comment ça marche</p>
+        <ol className="space-y-1 text-muted-foreground text-xs list-decimal list-inside">
+          <li>Saisis le numéro de {relationName} (pour filtrer uniquement vos échanges)</li>
+          <li>Clique sur "Générer le QR code"</li>
+          <li>Ouvre WhatsApp sur ton téléphone → Appareils connectés → Connecter un appareil</li>
+          <li>Scanne le QR code — la session est active !</li>
+        </ol>
+      </div>
+
+      {status === "none" || status === "disconnected" ? (
+        <div className="bg-card border rounded-2xl p-5 space-y-4">
+          {status === "disconnected" && (
+            <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <WifiOff className="h-3.5 w-3.5 shrink-0" />
+              Connexion perdue. Reconnecte-toi.
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold">Numéro de {relationName}</label>
+            <input
+              className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              placeholder="+33 6 12 34 56 78 (optionnel)"
+              value={contactPhone}
+              onChange={(e) => setContactPhone(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">Laisse vide pour capturer tous les contacts</p>
+          </div>
+          <Button onClick={handleConnect} className="w-full">
+            <QrCode className="h-4 w-4 mr-2" /> Générer le QR code
+          </Button>
+        </div>
+      ) : status === "connecting" ? (
+        <div className="bg-card border rounded-2xl p-8 flex flex-col items-center gap-3 text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="font-semibold">Connexion en cours…</p>
+          <p className="text-xs text-muted-foreground">Génération du QR code</p>
+        </div>
+      ) : status === "qr" ? (
+        <div className="bg-card border rounded-2xl overflow-hidden">
+          <div className="p-5 flex flex-col items-center gap-3">
+            <p className="text-sm font-semibold">Scanne avec ton téléphone</p>
+            <p className="text-xs text-muted-foreground">WhatsApp → Appareils connectés → Connecter un appareil</p>
+            {qrData && (
+              <img
+                src={qrData}
+                alt="QR Code WhatsApp"
+                className="w-52 h-52 rounded-xl border shadow-sm"
+              />
+            )}
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground animate-pulse">
+              <Loader2 className="h-3 w-3 animate-spin" /> En attente du scan…
+            </div>
+            <Button variant="outline" size="sm" onClick={handleConnect} className="gap-1.5">
+              <RefreshCw className="h-3.5 w-3.5" /> Actualiser le QR
+            </Button>
+          </div>
+        </div>
+      ) : status === "connected" ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-2xl px-4 py-3">
+            <div className="relative">
+              <Smartphone className="h-5 w-5 text-green-700" />
+              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-green-800 flex items-center gap-1.5">
+                <Wifi className="h-3.5 w-3.5" /> Session active
+              </p>
+              {savedContact && (
+                <p className="text-xs text-green-700">Filtré sur : +{savedContact}</p>
+              )}
+              <p className="text-xs text-green-700">Les messages arrivent en temps réel</p>
+            </div>
+            <Button
+              variant="ghost" size="icon"
+              className="text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0"
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+            >
+              {disconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            </Button>
+          </div>
+          <div className="text-xs text-muted-foreground bg-muted/40 rounded-xl p-3 space-y-1">
+            <p className="font-semibold text-foreground">Historique</p>
+            <p>WhatsApp synchronise automatiquement les messages récents au moment de la connexion. Pour l'historique complet, utilise l'import de fichier .txt depuis l'onglet Conversation.</p>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Business API Tab ─────────────────────────────────────────────────────────
+
+type BizConfig = { configured: boolean; phoneNumberId?: string; contactPhone?: string };
+type FormState = { phoneNumberId: string; accessToken: string; businessAccountId: string; contactPhone: string };
+
+function BusinessAPITab({ relationId, relationName }: { relationId: number; relationName: string }) {
+  const { toast } = useToast();
+  const [config, setConfig] = useState<BizConfig | null>(null);
   const [verifyToken, setVerifyToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [step, setStep] = useState<"idle" | "form" | "done">("idle");
-
-  const [form, setForm] = useState<FormState>({
-    phoneNumberId: "",
-    accessToken: "",
-    businessAccountId: "",
-    contactPhone: "",
-  });
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState<FormState>({ phoneNumberId: "", accessToken: "", businessAccountId: "", contactPhone: "" });
 
   useEffect(() => {
-    if (!relationId) return;
     fetch(`/api/relations/${relationId}/whatsapp/config`)
       .then((r) => r.json())
-      .then((d) => {
-        setConfig(d);
-        if (d.configured) setStep("done");
-        else setStep("idle");
-      })
+      .then((d) => { setConfig(d); if (!d.configured) setShowForm(false); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [relationId]);
@@ -73,8 +232,8 @@ export default function WhatsAppConfig() {
       if (!res.ok) throw new Error(data.error ?? "Erreur");
       setVerifyToken(data.verifyToken);
       setConfig({ configured: true, phoneNumberId: form.phoneNumberId, contactPhone: form.contactPhone });
-      setStep("done");
-      toast({ title: "WhatsApp connecté ✓", description: "Les nouveaux messages seront capturés automatiquement." });
+      setShowForm(false);
+      toast({ title: "WhatsApp Business connecté ✓" });
     } catch (err) {
       toast({ title: "Erreur", description: err instanceof Error ? err.message : "Erreur inconnue", variant: "destructive" });
     } finally {
@@ -83,15 +242,14 @@ export default function WhatsAppConfig() {
   };
 
   const handleDelete = async () => {
-    if (!confirm("Déconnecter WhatsApp ? Les messages déjà importés restent.")) return;
+    if (!confirm("Déconnecter WhatsApp Business ?")) return;
     setDeleting(true);
     try {
       await fetch(`/api/relations/${relationId}/whatsapp/config`, { method: "DELETE" });
       setConfig({ configured: false });
       setVerifyToken(null);
-      setStep("idle");
-      setForm({ phoneNumberId: "", accessToken: "", businessAccountId: "", contactPhone: "" });
-      toast({ title: "WhatsApp déconnecté" });
+      setShowForm(false);
+      toast({ title: "Déconnecté" });
     } catch {
       toast({ title: "Erreur", variant: "destructive" });
     } finally {
@@ -100,32 +258,134 @@ export default function WhatsAppConfig() {
   };
 
   const copy = (text: string, label: string) => {
-    navigator.clipboard.writeText(text).then(() =>
-      toast({ title: `${label} copié ✓` })
-    );
+    navigator.clipboard.writeText(text).then(() => toast({ title: `${label} copié ✓` }));
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+        <Info className="h-4 w-4 shrink-0 mt-0.5" />
+        <span>Nécessite un <strong>compte Meta Business vérifié</strong> et un numéro dédié (distinct de ton compte perso). Capture uniquement les nouveaux messages.</span>
       </div>
-    );
-  }
+
+      {!config?.configured && !showForm && (
+        <div className="bg-card border rounded-2xl p-6 text-center space-y-3">
+          <Building2 className="h-10 w-10 text-muted-foreground mx-auto" />
+          <div>
+            <p className="font-semibold">API Business non configurée</p>
+            <p className="text-sm text-muted-foreground">Connecte un compte WhatsApp Business officiel</p>
+          </div>
+          <Button onClick={() => setShowForm(true)}>Configurer l'API Business</Button>
+        </div>
+      )}
+
+      {showForm && (
+        <div className="bg-card border rounded-2xl overflow-hidden">
+          <div className="bg-muted/40 px-5 py-3 border-b space-y-1">
+            <p className="text-xs font-semibold">IDENTIFIANTS META BUSINESS</p>
+            <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+              Guide Meta <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+          <div className="p-5 space-y-4">
+            {[
+              { key: "phoneNumberId", label: "Phone Number ID *", placeholder: "123456789012345", hint: "Meta Dashboard → WhatsApp → Configuration → Phone Number ID", type: "text" },
+              { key: "accessToken", label: "Access Token permanent *", placeholder: "EAAxxxxx…", hint: "System User Token avec permission whatsapp_business_messaging", type: "password" },
+              { key: "businessAccountId", label: "WABA ID", placeholder: "optionnel", hint: "", type: "text" },
+              { key: "contactPhone", label: `Numéro de ${relationName}`, placeholder: "+33612345678", hint: "Pour distinguer qui envoie quoi", type: "text" },
+            ].map(({ key, label, placeholder, hint, type }) => (
+              <div key={key} className="space-y-1.5">
+                <label className="text-xs font-semibold">{label}</label>
+                <input
+                  type={type}
+                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  placeholder={placeholder}
+                  value={form[key as keyof FormState]}
+                  onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                />
+                {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+              </div>
+            ))}
+            <div className="flex gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowForm(false)} className="flex-1">Annuler</Button>
+              <Button onClick={handleSave} disabled={saving} className="flex-1">
+                {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                {saving ? "Enregistrement…" : "Connecter"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {config?.configured && !showForm && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-2xl px-4 py-3">
+            <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-green-800">API Business connectée</p>
+              <p className="text-xs text-green-700 truncate">Phone Number ID : {config.phoneNumberId}</p>
+            </div>
+            <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={handleDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            </Button>
+          </div>
+
+          {/* Webhook config */}
+          <div className="bg-card border rounded-2xl overflow-hidden">
+            <div className="bg-muted/40 px-4 py-2.5 border-b">
+              <p className="text-xs font-semibold text-muted-foreground">WEBHOOK À COLLER DANS META</p>
+            </div>
+            <div className="p-4 space-y-3">
+              {[
+                { label: "URL du webhook", value: webhookUrl },
+                ...(verifyToken ? [{ label: "Token de vérification", value: verifyToken }] : []),
+                { label: "Champ souscrit", value: "messages" },
+              ].map(({ label, value }) => (
+                <div key={label} className="space-y-1">
+                  <label className="text-xs font-semibold text-muted-foreground">{label}</label>
+                  <div className="flex items-center gap-2 bg-muted/40 rounded-lg px-3 py-2">
+                    <code className="flex-1 text-xs break-all">{value}</code>
+                    <button onClick={() => copy(value, label)} className="shrink-0 text-muted-foreground hover:text-foreground">
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {!verifyToken && (
+                <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+                  Pour récupérer le token de vérification, supprime et reconfigure la connexion.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+export default function WhatsAppConfig() {
+  const params = useParams<{ id: string }>();
+  const relationId = Number(params.id);
+  const { data: relation } = useGetRelation(relationId, { query: { enabled: !!relationId } });
+  const [tab, setTab] = useState<Tab>("qr");
+  const name = relation?.name ?? "le contact";
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       {/* Header */}
       <div className="space-y-1">
         <div className="flex items-center gap-2 text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-          <Smartphone className="h-3.5 w-3.5" />
-          WhatsApp Business
+          <Smartphone className="h-3.5 w-3.5" /> WhatsApp
         </div>
-        <h1 className="text-2xl font-bold">Connexion directe WhatsApp</h1>
+        <h1 className="text-2xl font-bold">Connexion WhatsApp</h1>
         <p className="text-sm text-muted-foreground">
-          Chaque message échangé avec{" "}
-          <span className="font-semibold text-foreground">{relation?.name ?? "…"}</span>{" "}
-          sera capturé automatiquement. Les vocaux sont transcrits par IA.
+          Capture automatique des messages avec <span className="font-semibold text-foreground">{name}</span>. Les vocaux sont transcrits par IA.
         </p>
       </div>
 
@@ -133,8 +393,8 @@ export default function WhatsAppConfig() {
       <div className="grid grid-cols-3 gap-3">
         {[
           { icon: Zap, label: "Temps réel", desc: "Messages capturés instantanément" },
-          { icon: Mic, label: "Vocaux", desc: "Transcription automatique Whisper" },
-          { icon: ShieldCheck, label: "Sécurisé", desc: "Signature Meta vérifiée" },
+          { icon: Mic, label: "Vocaux", desc: "Transcription automatique" },
+          { icon: ShieldCheck, label: "Sécurisé", desc: "Connexion chiffrée" },
         ].map(({ icon: Icon, label, desc }) => (
           <div key={label} className="bg-muted/40 rounded-xl p-3 space-y-1">
             <Icon className="h-4 w-4 text-primary" />
@@ -144,200 +404,32 @@ export default function WhatsAppConfig() {
         ))}
       </div>
 
-      {/* Warning */}
-      <div className="flex gap-2.5 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
-        <Info className="h-4 w-4 shrink-0 mt-0.5" />
-        <span>
-          L'API WhatsApp Business capture uniquement les <strong>nouveaux messages</strong> à partir de la connexion.
-          Pour l'historique existant, utilise l'import de fichier .txt depuis l'onglet Conversation.
-        </span>
+      {/* Tabs */}
+      <div className="flex gap-1 bg-muted/40 rounded-xl p-1">
+        {([
+          { id: "qr", label: "QR Code", icon: QrCode, desc: "Compte perso" },
+          { id: "business", label: "API Business", icon: Building2, desc: "Compte pro" },
+        ] as const).map(({ id, label, icon: Icon, desc }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+              tab === id ? "bg-card shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            <span>{label}</span>
+            <span className={cn("text-xs", tab === id ? "text-muted-foreground" : "text-muted-foreground/50")}>— {desc}</span>
+          </button>
+        ))}
       </div>
 
-      {step === "idle" && (
-        <div className="bg-card border rounded-2xl p-6 text-center space-y-3">
-          <Smartphone className="h-10 w-10 text-muted-foreground mx-auto" />
-          <div>
-            <p className="font-semibold">Pas encore connecté</p>
-            <p className="text-sm text-muted-foreground">Configure ton compte Meta Business pour commencer</p>
-          </div>
-          <Button onClick={() => setStep("form")}>Connecter WhatsApp Business</Button>
-        </div>
-      )}
-
-      {step === "form" && (
-        <div className="bg-card border rounded-2xl overflow-hidden">
-          {/* Steps guide */}
-          <div className="bg-muted/40 px-5 py-3 border-b">
-            <p className="text-xs font-semibold text-muted-foreground">PRÉREQUIS META</p>
-            <ol className="mt-1.5 space-y-1 text-xs text-muted-foreground list-decimal list-inside">
-              <li>Compte Meta Business vérifié avec WhatsApp Business Platform activée</li>
-              <li>Application Meta avec un numéro WhatsApp Business dédié</li>
-              <li>Token d'accès permanent (System User Token)</li>
-            </ol>
-            <a
-              href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 mt-2 text-xs text-primary hover:underline"
-            >
-              Guide Meta <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
-
-          <div className="p-5 space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold">Phone Number ID *</label>
-              <input
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                placeholder="123456789012345"
-                value={form.phoneNumberId}
-                onChange={(e) => setForm((f) => ({ ...f, phoneNumberId: e.target.value }))}
-              />
-              <p className="text-xs text-muted-foreground">Meta Dashboard → WhatsApp → Configuration → Phone Number ID</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold">Access Token permanent *</label>
-              <input
-                type="password"
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                placeholder="EAAxxxxx..."
-                value={form.accessToken}
-                onChange={(e) => setForm((f) => ({ ...f, accessToken: e.target.value }))}
-              />
-              <p className="text-xs text-muted-foreground">System User Token avec permissions whatsapp_business_messaging</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold">WhatsApp Business Account ID</label>
-              <input
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                placeholder="123456789012345 (optionnel)"
-                value={form.businessAccountId}
-                onChange={(e) => setForm((f) => ({ ...f, businessAccountId: e.target.value }))}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold">
-                Numéro de téléphone du contact
-              </label>
-              <input
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                placeholder="+33612345678"
-                value={form.contactPhone}
-                onChange={(e) => setForm((f) => ({ ...f, contactPhone: e.target.value }))}
-              />
-              <p className="text-xs text-muted-foreground">
-                Numéro de {relation?.name ?? "la personne"} — sert à distinguer qui envoie quoi
-              </p>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <Button variant="outline" onClick={() => setStep("idle")} className="flex-1">
-                Annuler
-              </Button>
-              <Button onClick={handleSave} disabled={saving} className="flex-1">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                {saving ? "Enregistrement…" : "Connecter"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {step === "done" && (
-        <div className="space-y-4">
-          {/* Status */}
-          <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-2xl px-4 py-3">
-            <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-green-800">WhatsApp connecté</p>
-              <p className="text-xs text-green-700 truncate">Phone Number ID : {config?.phoneNumberId}</p>
-              {config?.contactPhone && (
-                <p className="text-xs text-green-700">Contact : {config.contactPhone}</p>
-              )}
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-            </Button>
-          </div>
-
-          {/* Webhook config */}
-          <div className="bg-card border rounded-2xl overflow-hidden">
-            <div className="bg-muted/40 px-4 py-2.5 border-b">
-              <p className="text-xs font-semibold text-muted-foreground">CONFIGURATION WEBHOOK META</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Colle ces valeurs dans Meta Dashboard → WhatsApp → Configuration → Webhook
-              </p>
-            </div>
-            <div className="p-4 space-y-3">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-muted-foreground">URL du webhook</label>
-                <div className="flex items-center gap-2 bg-muted/40 rounded-lg px-3 py-2">
-                  <code className="flex-1 text-xs break-all">{webhookUrl}</code>
-                  <button
-                    onClick={() => copy(webhookUrl, "URL")}
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-muted-foreground">Token de vérification</label>
-                {verifyToken ? (
-                  <div className="flex items-center gap-2 bg-muted/40 rounded-lg px-3 py-2">
-                    <code className="flex-1 text-xs break-all">{verifyToken}</code>
-                    <button
-                      onClick={() => copy(verifyToken, "Token")}
-                      className="shrink-0 text-muted-foreground hover:text-foreground"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
-                    Le token de vérification a été généré lors de la configuration initiale.
-                    Pour le récupérer, supprime et reconfigure la connexion.
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-muted-foreground">Champ souscrit</label>
-                <div className="flex items-center gap-2 bg-muted/40 rounded-lg px-3 py-2">
-                  <code className="flex-1 text-xs">messages</code>
-                  <button
-                    onClick={() => copy("messages", "Champ")}
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="text-center">
-            <a
-              href="https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/components"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-            >
-              Comment configurer le webhook Meta <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
-        </div>
-      )}
+      {/* Tab content */}
+      {tab === "qr"
+        ? <QRTab relationId={relationId} relationName={name} />
+        : <BusinessAPITab relationId={relationId} relationName={name} />
+      }
     </div>
   );
 }
