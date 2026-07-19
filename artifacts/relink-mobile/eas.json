@@ -12,16 +12,28 @@
       },
       "ios": {
         "simulator": false
+      },
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ",
+        "EXPO_PUBLIC_DOMAIN": "10dcbdee-7c63-4ec2-ba84-86b58a4613a4-00-3kqb7l0xk54fo.spock.replit.dev"
       }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ",
+        "EXPO_PUBLIC_DOMAIN": "10dcbdee-7c63-4ec2-ba84-86b58a4613a4-00-3kqb7l0xk54fo.spock.replit.dev"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ",
+        "EXPO_PUBLIC_DOMAIN": "10dcbdee-7c63-4ec2-ba84-86b58a4613a4-00-3kqb7l0xk54fo.spock.replit.dev"
+      }
     }
   },
   "submit": {
