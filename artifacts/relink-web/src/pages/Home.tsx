@@ -41,34 +41,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Legacy data claim banner — shown only when unclaimed relations exist */}
-      {legacyCount > 0 && (
-        <section className="animate-in slide-in-from-bottom-4 fade-in duration-700 delay-250 fill-mode-both">
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="flex-1">
-              <h3 className="font-medium mb-1">Données existantes disponibles</h3>
-              <p className="text-sm text-muted-foreground">
-                {legacyCount} relation{legacyCount > 1 ? "s" : ""} créée{legacyCount > 1 ? "s" : ""} avant l'authentification
-                {legacyCount > 1 ? " sont disponibles" : " est disponible"}. Cliquez pour les rattacher à votre compte.
-              </p>
-            </div>
-            <Button
-              onClick={() => claimLegacy.mutate()}
-              disabled={claimLegacy.isPending}
-              className="rounded-full shrink-0"
-              variant="outline"
-            >
-              {claimLegacy.isPending ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4 mr-2" />
-              )}
-              Récupérer mes données
-            </Button>
-          </div>
-        </section>
-      )}
-
       {/* Existing Relations */}
       <section className="animate-in slide-in-from-bottom-4 fade-in duration-700 delay-300 fill-mode-both">
         <h2 className="text-sm font-medium tracking-wide uppercase text-muted-foreground mb-4">
