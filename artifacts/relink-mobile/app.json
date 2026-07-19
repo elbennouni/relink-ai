@@ -21,8 +21,7 @@
       }
     },
     "android": {
-      "package": "com.relinkapp.mobile",
-      "googleServicesFile": "./google-services.json"
+      "package": "com.relinkapp.mobile"
     },
     "web": {
       "favicon": "./assets/images/icon.png"
