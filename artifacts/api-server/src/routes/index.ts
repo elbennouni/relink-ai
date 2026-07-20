@@ -12,6 +12,8 @@ import transcribeRouter from "./transcribe";
 import suggestRepliesRouter from "./suggest_replies";
 import analyzeIncomingRouter from "./analyze_incoming";
 import pushTokensRouter from "./push_tokens";
+import powerBalanceRouter from "./power_balance";
+import addMessageRouter from "./add_message";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireRelationOwnership } from "../middlewares/requireRelationOwnership";
 
@@ -42,5 +44,7 @@ router.use(transcribeRouter);
 router.use(suggestRepliesRouter);
 router.use(analyzeIncomingRouter);
 router.use(pushTokensRouter);
+router.use(powerBalanceRouter);
+router.use(addMessageRouter);
 
 export default router;

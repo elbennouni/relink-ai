@@ -17,21 +17,25 @@ const expo = new Expo();
 /**
  * Send a push notification to all devices belonging to the owner of a relation.
  * Silently swaps out expired tokens.
+ *
+ * If `title` is omitted the relation's name is used automatically.
  */
 export async function notifyRelationOwner(
   relationId: number,
-  title: string,
+  title: string | null,
   body: string,
   data: Record<string, unknown> = {},
 ): Promise<void> {
-  // Resolve the userId who owns this relation
+  // Resolve the userId and name for this relation
   const [relation] = await db
-    .select({ userId: relationsTable.userId })
+    .select({ userId: relationsTable.userId, name: relationsTable.name })
     .from(relationsTable)
     .where(eq(relationsTable.id, relationId))
     .limit(1);
 
   if (!relation?.userId) return;
+
+  const finalTitle = title ?? relation.name ?? "Nouveau message";
 
   // Get all push tokens for this user
   const rows = await db
@@ -46,10 +50,12 @@ export async function notifyRelationOwner(
     .map((r) => ({
       to: r.token,
       sound: "default" as const,
-      title,
+      title: finalTitle,
       body,
       data: { relationId, ...data },
       priority: "high" as const,
+      badge: 1,
+      channelId: "messages",
     }));
 
   if (messages.length === 0) return;

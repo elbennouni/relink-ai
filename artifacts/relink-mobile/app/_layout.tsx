@@ -11,8 +11,9 @@ import {
   Inter_700Bold,
   useFonts,
 } from '@expo-google-fonts/inter';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Notifications from 'expo-notifications';
 import { ClerkProvider, ClerkLoaded, useAuth } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
 import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
@@ -63,6 +64,30 @@ function ClerkAuthSync() {
 }
 
 function RootLayoutNav() {
+  const router = useRouter();
+
+  // Navigate to the relation's conversation when user taps a push notification
+  useEffect(() => {
+    // Handle notification tap when app was in background / foreground
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as { relationId?: number };
+      if (data?.relationId) {
+        router.push(`/relations/${data.relationId}` as any);
+      }
+    });
+
+    // Handle the notification that *launched* the app (killed state)
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (!response) return;
+      const data = response.notification.request.content.data as { relationId?: number };
+      if (data?.relationId) {
+        router.push(`/relations/${data.relationId}` as any);
+      }
+    });
+
+    return () => sub.remove();
+  }, [router]);
+
   return (
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

@@ -403,7 +403,7 @@ async function startSession(relationId: number, contactPhone?: string) {
         const preview = content.length > 80 ? content.slice(0, 80) + "…" : content;
         notifyRelationOwner(
           targetRelationId,
-          `Nouveau message`,
+          null,           // null → auto-uses relation name as title
           preview,
           { relationId: targetRelationId },
         ).catch(() => {}); // fire-and-forget
