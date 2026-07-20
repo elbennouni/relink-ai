@@ -42,6 +42,14 @@ export default function RelationLayout() {
           headerTitleStyle: { fontFamily: 'Inter_600SemiBold', fontSize: 17 },
         }}
       />
+      <Stack.Screen
+        name="whatsapp"
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="no-contact"
+        options={{ headerShown: false }}
+      />
     </Stack>
   );
 }
