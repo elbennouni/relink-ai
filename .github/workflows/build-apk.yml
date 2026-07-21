@@ -28,8 +28,15 @@ jobs:
       - name: Install pnpm
         run: npm install -g pnpm@9
 
-      - name: Patch pnpm-workspace for CI
-        run: sed -i 's/^minimumReleaseAge:.*/minimumReleaseAge: 0/' pnpm-workspace.yaml
+      - name: Disable minimumReleaseAge for CI
+        run: |
+          node -e "
+          const fs = require('fs');
+          let c = fs.readFileSync('pnpm-workspace.yaml', 'utf8');
+          c = c.replace(/^minimumReleaseAge:\s*\d+/m, 'minimumReleaseAge: 0');
+          fs.writeFileSync('pnpm-workspace.yaml', c);
+          console.log('minimumReleaseAge disabled for CI');
+          "
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
@@ -40,6 +47,9 @@ jobs:
           EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY }}
           EXPO_PUBLIC_DOMAIN: ${{ secrets.EXPO_PUBLIC_DOMAIN }}
         run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Show generated build.gradle (debug)
+        run: cat artifacts/relink-mobile/android/app/build.gradle
 
       - name: Generate keystore
         working-directory: artifacts/relink-mobile/android/app
@@ -54,43 +64,20 @@ jobs:
             -keypass relinkpass \
             -dname "CN=ReLink AI, OU=Mobile, O=ReLink, L=Paris, S=IDF, C=FR"
 
-      - name: Inject signing config into build.gradle
-        working-directory: artifacts/relink-mobile/android/app
-        run: |
-          node -e "
-          const fs = require('fs');
-          let c = fs.readFileSync('build.gradle', 'utf8');
-
-          // Insert signingConfigs block before buildTypes
-          const sigBlock = \`
-              signingConfigs {
-                  release {
-                      storeFile file('relink.keystore')
-                      storePassword 'relinkpass'
-                      keyAlias 'relink'
-                      keyPassword 'relinkpass'
-                  }
-              }
-          \`;
-          c = c.replace('    buildTypes {', sigBlock + '    buildTypes {');
-
-          // Add signingConfig inside release buildType
-          c = c.replace(
-            /release \{/,
-            'release {\n            signingConfig signingConfigs.release'
-          );
-
-          fs.writeFileSync('build.gradle', c);
-          console.log('Signing config injected successfully');
-          "
-
       - name: Build signed release APK
         working-directory: artifacts/relink-mobile/android
         env:
-          GRADLE_OPTS: '-Xmx3g'
+          GRADLE_OPTS: '-Xmx4g -XX:MaxMetaspaceSize=512m'
           EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY }}
           EXPO_PUBLIC_DOMAIN: ${{ secrets.EXPO_PUBLIC_DOMAIN }}
-        run: ./gradlew assembleRelease --no-daemon -x lint
+        run: |
+          ./gradlew assembleRelease --no-daemon -x lint \
+            -Pandroid.injected.signing.store.file=$(pwd)/app/relink.keystore \
+            -Pandroid.injected.signing.store.password=relinkpass \
+            -Pandroid.injected.signing.key.alias=relink \
+            -Pandroid.injected.signing.key.password=relinkpass \
+            --stacktrace 2>&1 | tee /tmp/gradle.log | tail -150
+          echo "--- Exit code: $?"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -98,3 +85,11 @@ jobs:
           name: relink-apk
           path: artifacts/relink-mobile/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
+
+      - name: Upload Gradle log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-log
+          path: /tmp/gradle.log
+          retention-days: 3
