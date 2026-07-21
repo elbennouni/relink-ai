@@ -72,8 +72,12 @@ jobs:
 
       - name: Build signed release APK
         working-directory: artifacts/relink-mobile/android
+        # IMPORTANT: EXPO_PUBLIC_* must be set here too — Metro inlines them
+        # into the JS bundle during the Gradle build, not during expo prebuild.
         env:
           GRADLE_OPTS: '-Xmx3g'
+          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          EXPO_PUBLIC_DOMAIN: ${{ secrets.EXPO_PUBLIC_DOMAIN }}
         run: ./gradlew assembleRelease --no-daemon -x lint
 
       - name: Upload APK
