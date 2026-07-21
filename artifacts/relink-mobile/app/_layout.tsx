@@ -22,7 +22,7 @@ import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 // Set API base URL — use production domain by default so the APK always works
 const domain =
   process.env.EXPO_PUBLIC_DOMAIN ||
-  'workspace.mikam514.replit.app';
+  'ai-agent-tool-mikam514.replit.app';
 setBaseUrl(`https://${domain}`);
 
 // Fallback Clerk key so the app never freezes on startup with a missing key
