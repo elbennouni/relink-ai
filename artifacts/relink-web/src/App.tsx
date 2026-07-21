@@ -17,6 +17,7 @@ import Workspace from '@/pages/Workspace';
 import Memory from '@/pages/Memory';
 import Settings from '@/pages/Settings';
 import Upgrade from '@/pages/Upgrade';
+import Admin from '@/pages/Admin';
 import NotFound from '@/pages/not-found';
 import { PaywallGate } from '@/components/PaywallGate';
 
@@ -213,6 +214,9 @@ function AppRoutes() {
               </Route>
               <Route path="/upgrade">
                 <Protected><Upgrade /></Protected>
+              </Route>
+              <Route path="/admin">
+                <Protected><Admin /></Protected>
               </Route>
 
               <Route component={NotFound} />

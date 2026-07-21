@@ -15,6 +15,7 @@ import pushTokensRouter from "./push_tokens";
 import powerBalanceRouter from "./power_balance";
 import addMessageRouter from "./add_message";
 import scheduleMessageRouter from "./schedule_message";
+import adminRouter from "./admin";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireRelationOwnership } from "../middlewares/requireRelationOwnership";
 
@@ -48,5 +49,6 @@ router.use(pushTokensRouter);
 router.use(powerBalanceRouter);
 router.use(addMessageRouter);
 router.use(scheduleMessageRouter);
+router.use(adminRouter);
 
 export default router;

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Home, MessageSquare, BrainCircuit, Settings, ShieldOff, Smartphone, LogOut, Sparkles } from "lucide-react";
+import { Home, MessageSquare, BrainCircuit, Settings, ShieldOff, Smartphone, LogOut, Sparkles, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
 import { useAuth, useUser, useClerk } from "@clerk/react";
@@ -27,6 +27,7 @@ function DesktopSidebar() {
   const { user } = useUser();
   const { signOut } = useClerk();
   const { isPremium } = usePremium();
+  const isAdmin = !!(user?.publicMetadata as any)?.isAdmin;
 
   const basePath = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 
@@ -93,6 +94,17 @@ function DesktopSidebar() {
       </nav>
 
       <div className="mt-auto pt-6 border-t border-border/40 space-y-3">
+        {/* Admin link */}
+        {isSignedIn && isAdmin && (
+          <Link
+            href="/admin"
+            className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium bg-purple-50 border border-purple-100 text-purple-700 hover:bg-purple-100 transition-all"
+          >
+            <Shield className="h-4 w-4" />
+            Admin
+          </Link>
+        )}
+
         {/* Premium upgrade CTA */}
         {isSignedIn && !isPremium && (
           <Link
