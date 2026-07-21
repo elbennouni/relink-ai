@@ -43,11 +43,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Fix Metro bundler deps (pnpm workspace compat)
-        working-directory: artifacts/relink-mobile
-        run: |
-          npm install --no-save babel-preset-expo @babel/core @babel/runtime
-
       - name: Expo Prebuild
         working-directory: artifacts/relink-mobile
         env:
