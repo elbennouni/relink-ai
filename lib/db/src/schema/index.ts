@@ -11,3 +11,4 @@ export * from "./whatsapp_accounts";
 export * from "./whatsapp_lid_mappings";
 export * from "./push_tokens";
 export * from "./scheduled_messages";
+export * from "./power_analyses";

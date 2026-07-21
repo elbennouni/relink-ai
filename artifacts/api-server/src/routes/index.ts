@@ -16,6 +16,7 @@ import powerBalanceRouter from "./power_balance";
 import addMessageRouter from "./add_message";
 import scheduleMessageRouter from "./schedule_message";
 import adminRouter from "./admin";
+import powerAnalysisRouter from "./power_analysis";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireRelationOwnership } from "../middlewares/requireRelationOwnership";
 
@@ -50,5 +51,6 @@ router.use(powerBalanceRouter);
 router.use(addMessageRouter);
 router.use(scheduleMessageRouter);
 router.use(adminRouter);
+router.use(powerAnalysisRouter);
 
 export default router;

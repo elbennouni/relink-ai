@@ -18,6 +18,7 @@ import Memory from '@/pages/Memory';
 import Settings from '@/pages/Settings';
 import Upgrade from '@/pages/Upgrade';
 import Admin from '@/pages/Admin';
+import PowerAnalysis from '@/pages/PowerAnalysis';
 import NotFound from '@/pages/not-found';
 import { PaywallGate } from '@/components/PaywallGate';
 
@@ -205,6 +206,9 @@ function AppRoutes() {
               </Route>
               <Route path="/relations/:id/whatsapp">
                 <Protected><PaywallGate><WhatsAppConfig /></PaywallGate></Protected>
+              </Route>
+              <Route path="/relations/:id/rapport-de-force">
+                <Protected><PaywallGate><PowerAnalysis /></PaywallGate></Protected>
               </Route>
               <Route path="/relations/:id">
                 <Protected><PaywallGate><Workspace /></PaywallGate></Protected>

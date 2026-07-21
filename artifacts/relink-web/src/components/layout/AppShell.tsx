@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Home, MessageSquare, BrainCircuit, Settings, ShieldOff, Smartphone, LogOut, Sparkles, Shield } from "lucide-react";
+import { Home, MessageSquare, BrainCircuit, Settings, ShieldOff, Smartphone, LogOut, Sparkles, Shield, Swords } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
 import { useAuth, useUser, useClerk } from "@clerk/react";
@@ -41,6 +41,7 @@ function DesktopSidebar() {
       ? [
           { href: `/relations/${relationId}`, label: "Conversation", icon: MessageSquare, exact: true },
           { href: `/relations/${relationId}/memory`, label: "Mémoire", icon: BrainCircuit, exact: false },
+          { href: `/relations/${relationId}/rapport-de-force`, label: "Rapport de force", icon: Swords, exact: false },
           { href: `/relations/${relationId}/no-contact`, label: "No Contact", icon: ShieldOff, exact: false },
           { href: `/relations/${relationId}/whatsapp`, label: "WhatsApp", icon: Smartphone, exact: false },
         ]
@@ -175,6 +176,7 @@ function MobileNav() {
       ? [
           { href: `/relations/${relationId}`, label: "Conversation", icon: MessageSquare, exact: true },
           { href: `/relations/${relationId}/memory`, label: "Mémoire", icon: BrainCircuit, exact: false },
+          { href: `/relations/${relationId}/rapport-de-force`, label: "Force", icon: Swords, exact: false },
           { href: `/relations/${relationId}/no-contact`, label: "No Contact", icon: ShieldOff, exact: false },
           { href: `/relations/${relationId}/whatsapp`, label: "WhatsApp", icon: Smartphone, exact: false },
         ]
