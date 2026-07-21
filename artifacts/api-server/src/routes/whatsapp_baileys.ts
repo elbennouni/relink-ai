@@ -635,4 +635,17 @@ router.post("/relations/:id/whatsapp/disconnect-qr", async (req, res) => {
   res.json({ success: true });
 });
 
+/** Send a message via the active WA session for a relation. Returns true if sent. */
+export async function sendViaWA(relationId: number, text: string): Promise<boolean> {
+  const session = sessions.get(relationId);
+  if (!session || session.status !== "connected") return false;
+  const phone = session.contactPhone?.replace(/\D/g, "");
+  if (!phone) return false;
+  const jid = `${phone}@s.whatsapp.net`;
+  try {
+    await session.socket.sendMessage(jid, { text });
+    return true;
+  } catch { return false; }
+}
+
 export default router;

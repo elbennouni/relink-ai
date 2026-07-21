@@ -2,3 +2,6 @@
 - [API server build quirks](api-server-build.md) — zod must be in api-server dependencies explicitly; health.ts must not import from api-zod; useToast lives in @/hooks/use-toast not @/components/ui/toast
 - [WhatsApp media handling](whatsapp-media.md) — images/audio stored as base64 in media_data column; isImage/isAudio must check data URL prefix, not just !!mediaData; multer needed for /api/transcribe
 - [WhatsApp LID JID routing](whatsapp-lid-routing.md) — @lid JIDs are real messages; learn LID↔phone from contacts.upsert + outgoing messages; never filter @lid
+- [Workspace.tsx hook ordering](workspace-hook-order.md) — callbacks that depend on waLiveStatus or loadInitial must be declared AFTER those are initialized; placing them before causes TDZ errors
+- [Paywall implementation](paywall-impl.md) — usePremium checks Clerk publicMetadata.isPremium; free routes: /no-contact only; PaywallGate wraps pages in App.tsx; VITE_FORCE_PREMIUM=true bypasses in dev
+- [Scheduled messages](scheduled-messages.md) — table: scheduled_messages; job runs every 60s in api-server/index.ts; sendViaWA exported from whatsapp_baileys.ts; mobile has timer Modal; web has DropdownMenu on both input bar and SuggestRepliesDialog

@@ -7,10 +7,18 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Wand2, Copy, CornerDownRight, RefreshCw, Send, SmartphoneNfc } from "lucide-react";
+import {
+  Loader2, Wand2, Copy, CornerDownRight, RefreshCw, Send, SmartphoneNfc, Clock, ChevronDown,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
-type Suggestion = { text: string; label: string };
+type Suggestion = { text: string; label: string; score?: number; scoreLabel?: string };
 type ContextMsg = { sender: string; content: string; isMe: boolean };
 
 type Props = {
@@ -23,6 +31,40 @@ type Props = {
   onPasteToAgent: (text: string) => void;
 };
 
+const DELAY_OPTIONS = [
+  { label: "Envoyer maintenant", minutes: 0 },
+  { label: "Dans 30 minutes", minutes: 30 },
+  { label: "Dans 2 heures", minutes: 120 },
+  { label: "Dans 5 heures", minutes: 300 },
+];
+
+function ScoreBar({ score, label }: { score: number; label?: string }) {
+  const color =
+    score >= 70 ? "bg-emerald-500" :
+    score >= 40 ? "bg-amber-500" :
+    "bg-rose-500";
+
+  return (
+    <div className="flex items-center gap-2 mt-1 mb-2.5">
+      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+        <div
+          className={cn("h-full rounded-full transition-all", color)}
+          style={{ width: `${score}%` }}
+        />
+      </div>
+      <span className={cn(
+        "text-[10px] font-bold tabular-nums",
+        score >= 70 ? "text-emerald-600" : score >= 40 ? "text-amber-600" : "text-rose-600"
+      )}>
+        {score}
+      </span>
+      {label && (
+        <span className="text-[10px] text-muted-foreground font-medium">{label}</span>
+      )}
+    </div>
+  );
+}
+
 export function SuggestRepliesDialog({
   open, onClose, relationId, contactName, contactPhone, waConnected, onPasteToAgent,
 }: Props) {
@@ -33,6 +75,7 @@ export function SuggestRepliesDialog({
   const [copied, setCopied] = useState<number | null>(null);
   const [sending, setSending] = useState<number | null>(null);
   const [sent, setSent] = useState<number | null>(null);
+  const [scheduled, setScheduled] = useState<{ i: number; label: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const generate = useCallback(async () => {
@@ -40,6 +83,7 @@ export function SuggestRepliesDialog({
     setError(null);
     setSuggestions([]);
     setSent(null);
+    setScheduled(null);
     try {
       const res = await fetch(`/api/relations/${relationId}/suggest-replies`, {
         method: "POST",
@@ -57,21 +101,35 @@ export function SuggestRepliesDialog({
     }
   }, [relationId, intent]);
 
-  const handleSendWhatsApp = async (text: string, i: number) => {
+  const handleSend = async (text: string, i: number, delayMinutes: number) => {
     setSending(i);
     setError(null);
     try {
-      const res = await fetch(`/api/relations/${relationId}/whatsapp/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error ?? `HTTP ${res.status}`);
+      if (delayMinutes > 0) {
+        // Scheduled send
+        const res = await fetch(`/api/relations/${relationId}/messages/schedule`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: text, delayMinutes }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const label = DELAY_OPTIONS.find(o => o.minutes === delayMinutes)?.label ?? "programmé";
+        setScheduled({ i, label });
+        setTimeout(() => { setScheduled(null); onClose(); }, 1800);
+      } else {
+        // Immediate send via WhatsApp
+        const res = await fetch(`/api/relations/${relationId}/whatsapp/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error ?? `HTTP ${res.status}`);
+        }
+        setSent(i);
+        setTimeout(() => { setSent(null); onClose(); }, 1200);
       }
-      setSent(i);
-      setTimeout(() => { setSent(null); onClose(); }, 1200);
     } catch (e: unknown) {
       setError(`Envoi échoué : ${e instanceof Error ? e.message : "erreur"}`);
     } finally {
@@ -90,7 +148,6 @@ export function SuggestRepliesDialog({
     if (!isOpen) onClose();
   };
 
-  // Format phone for display: +33 6 xx xx xx xx
   const displayPhone = contactPhone
     ? `+${contactPhone.slice(0, 2)} ${contactPhone.slice(2).replace(/(\d{1})(\d{2})(\d{2})(\d{2})(\d{2})/, "$1 $2 $3 $4 $5")}`
     : null;
@@ -103,7 +160,6 @@ export function SuggestRepliesDialog({
             <Wand2 className="h-4 w-4 text-violet-500" />
             Générer une réponse WhatsApp
           </DialogTitle>
-          {/* Destinataire visible */}
           <div className="mt-2 flex items-center gap-2">
             <SmartphoneNfc className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-xs text-muted-foreground">
@@ -190,16 +246,22 @@ export function SuggestRepliesDialog({
               </p>
               {suggestions.map((s, i) => (
                 <div key={i} className="bg-card border rounded-xl px-4 py-3 hover:border-violet-200 transition-all">
-                  <span className="inline-block text-[10px] font-semibold text-violet-600 bg-violet-50 rounded-full px-2 py-0.5 mb-2">
+                  <span className="inline-block text-[10px] font-semibold text-violet-600 bg-violet-50 rounded-full px-2 py-0.5 mb-1.5">
                     {s.label}
                   </span>
+
+                  {/* Score bar */}
+                  {typeof s.score === "number" && (
+                    <ScoreBar score={s.score} label={s.scoreLabel} />
+                  )}
+
                   <p className="text-[14px] leading-relaxed text-foreground whitespace-pre-wrap mb-3">{s.text}</p>
 
                   <div className="flex gap-1.5">
-                    {/* Bouton principal : envoyer sur WhatsApp */}
+                    {/* Envoyer maintenant */}
                     <Button
                       size="sm"
-                      onClick={() => handleSendWhatsApp(s.text, i)}
+                      onClick={() => handleSend(s.text, i, 0)}
                       disabled={!waConnected || sending === i}
                       className={cn(
                         "flex-1 h-8 text-xs rounded-lg gap-1.5",
@@ -211,10 +273,39 @@ export function SuggestRepliesDialog({
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : sent === i ? (
                         "✓ Envoyé !"
+                      ) : scheduled?.i === i ? (
+                        `⏱ ${scheduled.label}`
                       ) : (
-                        <><Send className="h-3.5 w-3.5" />Envoyer sur WhatsApp</>
+                        <><Send className="h-3.5 w-3.5" />Envoyer</>
                       )}
                     </Button>
+
+                    {/* Timer de réponse — dropdown */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={sending === i}
+                          className="h-8 px-2.5 text-xs rounded-lg gap-1"
+                          title="Programmer l'envoi"
+                        >
+                          <Clock className="h-3.5 w-3.5" />
+                          <ChevronDown className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48">
+                        {DELAY_OPTIONS.slice(1).map((opt) => (
+                          <DropdownMenuItem
+                            key={opt.minutes}
+                            onClick={() => handleSend(s.text, i, opt.minutes)}
+                          >
+                            <Clock className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
+                            {opt.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
 
                     {/* Copier */}
                     <Button size="sm" variant="outline" onClick={() => handleCopy(s.text, i)} className="h-8 px-3 text-xs rounded-lg">

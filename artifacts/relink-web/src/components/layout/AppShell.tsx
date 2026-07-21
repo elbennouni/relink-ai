@@ -1,8 +1,9 @@
 import { Link, useLocation } from "wouter";
-import { Home, MessageSquare, BrainCircuit, Settings, ShieldOff, Smartphone, LogOut } from "lucide-react";
+import { Home, MessageSquare, BrainCircuit, Settings, ShieldOff, Smartphone, LogOut, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
 import { useAuth, useUser, useClerk } from "@clerk/react";
+import { usePremium } from "@/hooks/usePremium";
 
 interface AppShellProps {
   children: ReactNode;
@@ -25,6 +26,7 @@ function DesktopSidebar() {
   const { isSignedIn } = useAuth();
   const { user } = useUser();
   const { signOut } = useClerk();
+  const { isPremium } = usePremium();
 
   const basePath = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 
@@ -91,6 +93,22 @@ function DesktopSidebar() {
       </nav>
 
       <div className="mt-auto pt-6 border-t border-border/40 space-y-3">
+        {/* Premium upgrade CTA */}
+        {isSignedIn && !isPremium && (
+          <Link
+            href="/upgrade"
+            className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium bg-gradient-to-r from-primary/5 to-primary/10 border border-primary/20 text-primary hover:from-primary/10 hover:to-primary/15 transition-all"
+          >
+            <Sparkles className="h-4 w-4" />
+            Passer à Premium
+          </Link>
+        )}
+        {isSignedIn && isPremium && (
+          <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-emerald-700 bg-emerald-50 rounded-lg border border-emerald-100">
+            <Sparkles className="h-3.5 w-3.5" />
+            Premium actif
+          </div>
+        )}
         {isSignedIn && user ? (
           <div className="space-y-3">
             <div className="flex items-center gap-3">

@@ -10,3 +10,4 @@ export * from "./no_contact";
 export * from "./whatsapp_accounts";
 export * from "./whatsapp_lid_mappings";
 export * from "./push_tokens";
+export * from "./scheduled_messages";

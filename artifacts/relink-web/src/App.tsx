@@ -16,7 +16,9 @@ import ImportFlow from '@/pages/Import';
 import Workspace from '@/pages/Workspace';
 import Memory from '@/pages/Memory';
 import Settings from '@/pages/Settings';
+import Upgrade from '@/pages/Upgrade';
 import NotFound from '@/pages/not-found';
+import { PaywallGate } from '@/components/PaywallGate';
 
 const queryClient = new QueryClient();
 
@@ -192,22 +194,25 @@ function AppRoutes() {
                 <Protected><CreateRelation /></Protected>
               </Route>
               <Route path="/relations/:id/import">
-                <Protected><ImportFlow /></Protected>
+                <Protected><PaywallGate><ImportFlow /></PaywallGate></Protected>
               </Route>
               <Route path="/relations/:id/memory">
-                <Protected><Memory /></Protected>
+                <Protected><PaywallGate><Memory /></PaywallGate></Protected>
               </Route>
               <Route path="/relations/:id/no-contact">
                 <Protected><NoContact /></Protected>
               </Route>
               <Route path="/relations/:id/whatsapp">
-                <Protected><WhatsAppConfig /></Protected>
+                <Protected><PaywallGate><WhatsAppConfig /></PaywallGate></Protected>
               </Route>
               <Route path="/relations/:id">
-                <Protected><Workspace /></Protected>
+                <Protected><PaywallGate><Workspace /></PaywallGate></Protected>
               </Route>
               <Route path="/settings">
                 <Protected><Settings /></Protected>
+              </Route>
+              <Route path="/upgrade">
+                <Protected><Upgrade /></Protected>
               </Route>
 
               <Route component={NotFound} />

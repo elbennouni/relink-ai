@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Platform, ActivityIndicator, RefreshControl, TextInput,
-  KeyboardAvoidingView, Keyboard, Share,
+  KeyboardAvoidingView, Keyboard, Share, Modal,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -87,6 +87,7 @@ export default function ConversationScreen() {
   const [inputText, setInputText] = useState('');
   const [sendingText, setSendingText] = useState(false);
   const [pickingImage, setPickingImage] = useState(false);
+  const [timerOpen, setTimerOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   const messages = (messageData?.messages ?? []) as Msg[];
@@ -252,6 +253,22 @@ export default function ConversationScreen() {
     Keyboard.dismiss();
     setSuggestOpen(true);
   }, []);
+
+  const handleScheduleSend = useCallback(async (text: string, delayMinutes: number) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setInputText('');
+    try {
+      await apiFetch(`/api/relations/${relationId}/messages/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: trimmed, delayMinutes }),
+      });
+    } catch (e) {
+      console.warn('[Schedule]', e);
+      setInputText(trimmed);
+    }
+  }, [relationId, apiFetch]);
 
   // ─── Render helpers ───────────────────────────────────────────────────────
 
@@ -526,19 +543,31 @@ export default function ConversationScreen() {
             <Feather name="zap" size={20} color={suggestOpen ? colors.accent : colors.mutedForeground} />
           </TouchableOpacity>
 
-          {/* Send button — shows when text is present */}
+          {/* Timer + Send buttons — visible when text present */}
           {inputText.trim().length > 0 && (
-            <TouchableOpacity
-              style={[styles.sendBtn, { backgroundColor: colors.primary }]}
-              onPress={handleSendText}
-              disabled={sendingText}
-              activeOpacity={0.85}
-            >
-              {sendingText
-                ? <ActivityIndicator size="small" color={colors.primaryForeground} />
-                : <Feather name={waConnected ? 'send' : 'plus'} size={18} color={colors.primaryForeground} />
-              }
-            </TouchableOpacity>
+            <>
+              {/* Timer de réponse */}
+              <TouchableOpacity
+                style={[styles.timerBtn, { backgroundColor: colors.muted, borderColor: colors.border }]}
+                onPress={() => { Keyboard.dismiss(); setTimerOpen(true); }}
+                activeOpacity={0.7}
+              >
+                <Feather name="clock" size={16} color={colors.mutedForeground} />
+              </TouchableOpacity>
+
+              {/* Send now */}
+              <TouchableOpacity
+                style={[styles.sendBtn, { backgroundColor: colors.primary }]}
+                onPress={handleSendText}
+                disabled={sendingText}
+                activeOpacity={0.85}
+              >
+                {sendingText
+                  ? <ActivityIndicator size="small" color={colors.primaryForeground} />
+                  : <Feather name={waConnected ? 'send' : 'plus'} size={18} color={colors.primaryForeground} />
+                }
+              </TouchableOpacity>
+            </>
           )}
 
           {/* Ask ReLink button — shows when no text */}
@@ -553,6 +582,54 @@ export default function ConversationScreen() {
           )}
         </View>
       )}
+
+      {/* Timer de réponse Modal */}
+      <Modal
+        visible={timerOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setTimerOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.timerOverlay}
+          activeOpacity={1}
+          onPress={() => setTimerOpen(false)}
+        >
+          <View style={[styles.timerSheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+            <Text style={[styles.timerTitle, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>
+              ⏱ Timer de réponse
+            </Text>
+            <Text style={[styles.timerSub, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
+              Le message sera envoyé automatiquement
+            </Text>
+            {[
+              { label: 'Dans 30 minutes', minutes: 30 },
+              { label: 'Dans 2 heures', minutes: 120 },
+              { label: 'Dans 5 heures', minutes: 300 },
+            ].map((opt) => (
+              <TouchableOpacity
+                key={opt.minutes}
+                style={[styles.timerOption, { borderTopColor: colors.border }]}
+                onPress={() => { setTimerOpen(false); handleScheduleSend(inputText, opt.minutes); }}
+                activeOpacity={0.7}
+              >
+                <Feather name="clock" size={18} color={colors.accent} style={{ marginRight: 14 }} />
+                <Text style={[styles.timerOptionText, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[styles.timerCancel, { borderTopColor: colors.border }]}
+              onPress={() => setTimerOpen(false)}
+            >
+              <Text style={[{ color: colors.mutedForeground, fontFamily: 'Inter_500Medium', fontSize: 15 }]}>
+                Annuler
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Lightbox */}
       {lightboxUri && (
@@ -664,6 +741,35 @@ const styles = StyleSheet.create({
   selCancelBtn: {
     width: 36, height: 36, borderRadius: 18, borderWidth: 1,
     alignItems: 'center', justifyContent: 'center',
+  },
+
+  /* Timer modal */
+  timerBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  timerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  timerSheet: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingTop: 24, paddingBottom: 44, paddingHorizontal: 20,
+  },
+  timerTitle: { fontSize: 18, marginBottom: 4 },
+  timerSub: { fontSize: 13, marginBottom: 16 },
+  timerOption: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  timerOptionText: { fontSize: 16 },
+  timerCancel: {
+    marginTop: 4, paddingVertical: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
   },
 
   /* Lightbox */

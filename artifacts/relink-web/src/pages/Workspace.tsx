@@ -28,7 +28,15 @@ import {
   Mic,
   Square,
   Wand2,
+  Clock,
+  ChevronDown,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SuggestRepliesDialog } from "@/components/SuggestRepliesDialog";
 import { StrategyPanel, type StrategyResult } from "@/components/StrategyPanel";
 import { Button } from "@/components/ui/button";
@@ -144,6 +152,11 @@ export default function Workspace() {
   // ── Générateur de réponses ─────────────────────────────────────────────────
   const [suggestOpen, setSuggestOpen] = useState(false);
 
+  // ── WA direct input bar ────────────────────────────────────────────────────
+  const [waDirectInput, setWaDirectInput] = useState("");
+  const [waSendingDirect, setWaSendingDirect] = useState(false);
+  const [scheduledPending, setScheduledPending] = useState<Array<{ id: number; content: string; scheduledAt: string }>>([]);
+
   // ── Analyse stratégique message entrant ────────────────────────────────────
   const [strategyResult, setStrategyResult] = useState<StrategyResult | null>(null);
   const [strategyLoading, setStrategyLoading] = useState(false);
@@ -193,13 +206,13 @@ export default function Workspace() {
     setIsRecording(false);
   }, []);
 
+  // ── WhatsApp live status (declared here so callbacks below can use it) ───────
+  const [waLiveStatus, setWaLiveStatus] = useState<"none" | "connected" | "connecting" | "disconnected">("none");
+  const [waContactPhone, setWaContactPhone] = useState<string | undefined>(undefined);
+
   // ── Auto-refresh visuel ────────────────────────────────────────────────────
   const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
   const [newMessageCount, setNewMessageCount] = useState(0);
-
-  // ── WhatsApp live status ───────────────────────────────────────────────────
-  const [waLiveStatus, setWaLiveStatus] = useState<"none" | "connected" | "connecting" | "disconnected">("none");
-  const [waContactPhone, setWaContactPhone] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (!relationId) return;
@@ -290,6 +303,55 @@ export default function Workspace() {
   useEffect(() => {
     loadInitial();
   }, [relationId]);
+
+  // ── WA direct input bar — scheduled messages ───────────────────────────────
+  const loadScheduled = useCallback(() => {
+    if (!relationId) return;
+    fetch(`/api/relations/${relationId}/messages/scheduled`)
+      .then((r) => r.json())
+      .then((d) => setScheduledPending(d.scheduled ?? []))
+      .catch(() => {});
+  }, [relationId]);
+
+  useEffect(() => { loadScheduled(); }, [loadScheduled]);
+
+  const handleWaDirectSend = useCallback(async (text: string, delayMinutes: number) => {
+    const trimmed = text.trim();
+    if (!trimmed || waSendingDirect) return;
+    setWaSendingDirect(true);
+    setWaDirectInput("");
+    try {
+      if (delayMinutes > 0) {
+        await fetch(`/api/relations/${relationId}/messages/schedule`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: trimmed, delayMinutes }),
+        });
+        const label = delayMinutes === 30 ? "30 min" : delayMinutes === 120 ? "2h" : "5h";
+        toast({ title: "Message programmé", description: `Envoi dans ${label}` });
+        loadScheduled();
+      } else if (waLiveStatus === "connected") {
+        await fetch(`/api/relations/${relationId}/whatsapp/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: trimmed }),
+        });
+        setTimeout(() => loadInitial(), 600);
+      } else {
+        await fetch(`/api/relations/${relationId}/messages/add`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: trimmed }),
+        });
+        setTimeout(() => loadInitial(), 600);
+      }
+    } catch {
+      toast({ title: "Erreur", description: "Impossible d'envoyer.", variant: "destructive" });
+      setWaDirectInput(trimmed);
+    } finally {
+      setWaSendingDirect(false);
+    }
+  }, [waSendingDirect, relationId, waLiveStatus, toast, loadInitial, loadScheduled]);
 
   // ── Live refresh : nouveaux messages quand WhatsApp est connecté ───────────
   const newestSentAtRef = useRef<string | null>(null);
@@ -1313,6 +1375,118 @@ export default function Workspace() {
             />
           )}
         </div>{/* end body (month strip + messages) */}
+
+        {/* ── WA Direct Input bar ──────────────────────────────────────────── */}
+        <div className="border-t bg-background/90 backdrop-blur-sm shrink-0">
+          {/* Scheduled pending badge */}
+          {scheduledPending.length > 0 && (
+            <div className="px-4 py-1.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2 text-xs text-amber-700">
+              <Clock className="h-3 w-3 shrink-0" />
+              <span className="flex-1">
+                {scheduledPending.length} message{scheduledPending.length > 1 ? "s" : ""} programmé{scheduledPending.length > 1 ? "s" : ""}
+              </span>
+              <button
+                onClick={() => {
+                  scheduledPending.forEach((m) =>
+                    fetch(`/api/relations/${relationId}/messages/scheduled/${m.id}`, { method: "DELETE" }).catch(() => {})
+                  );
+                  setScheduledPending([]);
+                }}
+                className="underline hover:no-underline"
+              >
+                Annuler tout
+              </button>
+            </div>
+          )}
+
+          <div className="px-3 py-2 flex items-end gap-2 max-w-3xl mx-auto">
+            {/* ⚡ Suggestions */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full text-violet-500 hover:bg-violet-50 h-9 w-9 shrink-0"
+              title="Générer une réponse IA"
+              onClick={() => setSuggestOpen(true)}
+            >
+              <Wand2 className="h-4 w-4" />
+            </Button>
+
+            {/* Text area */}
+            <textarea
+              value={waDirectInput}
+              onChange={(e) => {
+                setWaDirectInput(e.target.value);
+                // auto-resize
+                e.target.style.height = "auto";
+                e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+              }}
+              placeholder={
+                waLiveStatus === "connected"
+                  ? `Message à ${relation?.participantOther ?? "…"}…`
+                  : "Ajouter un message à la conversation…"
+              }
+              className="flex-1 resize-none text-sm bg-muted/60 border rounded-xl px-3 py-2 h-9 max-h-[120px] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-colors leading-5"
+              rows={1}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleWaDirectSend(waDirectInput, 0);
+                }
+              }}
+            />
+
+            {/* Actions — visible only when text present */}
+            {waDirectInput.trim() && (
+              <div className="flex items-center gap-1 shrink-0">
+                {/* Timer de réponse */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 rounded-xl"
+                      title="Programmer l'envoi"
+                      disabled={waSendingDirect}
+                    >
+                      <Clock className="h-4 w-4 text-amber-600" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <div className="px-2 pt-1.5 pb-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                      Timer de réponse
+                    </div>
+                    {[
+                      { label: "Dans 30 minutes", m: 30 },
+                      { label: "Dans 2 heures", m: 120 },
+                      { label: "Dans 5 heures", m: 300 },
+                    ].map((opt) => (
+                      <DropdownMenuItem
+                        key={opt.m}
+                        onClick={() => handleWaDirectSend(waDirectInput, opt.m)}
+                      >
+                        <Clock className="h-3.5 w-3.5 mr-2 text-amber-500" />
+                        {opt.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Send now */}
+                <Button
+                  size="sm"
+                  className="h-9 rounded-xl px-3.5 gap-1.5"
+                  onClick={() => handleWaDirectSend(waDirectInput, 0)}
+                  disabled={waSendingDirect}
+                >
+                  {waSendingDirect
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <Send className="h-4 w-4" />
+                  }
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>{/* end left panel */}
 
       {/* ── Right — Agent ──────────────────────────────────────────────────── */}

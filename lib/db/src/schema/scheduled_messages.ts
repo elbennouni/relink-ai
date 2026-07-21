@@ -1,0 +1,19 @@
+import { integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { relationsTable } from "./relations";
+
+export const scheduledMessagesTable = pgTable("scheduled_messages", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  relationId: integer("relation_id")
+    .notNull()
+    .references(() => relationsTable.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  mediaData: text("media_data"),
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  status: text("status").notNull().default("pending"), // pending | sent | failed | cancelled
+  failReason: text("fail_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type ScheduledMessage = typeof scheduledMessagesTable.$inferSelect;

@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { runLegacyMigration } from "./lib/legacyMigration";
+import { startScheduledMessageJob } from "./routes/schedule_message";
 
 const rawPort = process.env["PORT"];
 
@@ -27,4 +28,7 @@ app.listen(port, async (err) => {
   // One-time migration: assign pre-auth (null userId) relations to a designated owner.
   // Triggered only when LEGACY_MIGRATION_OWNER_ID is set in the environment.
   await runLegacyMigration();
+
+  // Start background job for scheduled messages (timer de réponse)
+  startScheduledMessageJob();
 });
