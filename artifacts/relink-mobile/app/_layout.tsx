@@ -18,11 +18,16 @@ import { ClerkProvider, ClerkLoaded, useAuth } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
 import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 
-// Set API base URL outside component — called once at module load
-const domain = process.env.EXPO_PUBLIC_DOMAIN;
-if (domain) setBaseUrl(`https://${domain}`);
+// Set API base URL — fallback to known dev domain if env var not embedded at build time
+const domain =
+  process.env.EXPO_PUBLIC_DOMAIN ||
+  '10dcbdee-7c63-4ec2-ba84-86b58a4613a4-00-3kqb7l0xk54fo.spock.replit.dev';
+setBaseUrl(`https://${domain}`);
 
-const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
+// Fallback Clerk key so the app never freezes on startup with a missing key
+const publishableKey =
+  process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+  'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ';
 const proxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined;
 
 SplashScreen.preventAutoHideAsync();
