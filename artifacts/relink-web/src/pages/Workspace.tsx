@@ -30,6 +30,8 @@ import {
   Wand2,
   Clock,
   ShieldAlert,
+  Download,
+  Copy,
 } from "lucide-react";
 import { SuggestRepliesDialog } from "@/components/SuggestRepliesDialog";
 import { ScheduleTimerPopover } from "@/components/ScheduleTimerPopover";
@@ -308,8 +310,7 @@ export default function Workspace() {
   const loadInitial = useCallback(() => {
     if (!relationId) return;
     setWaLoading(true);
-    setWaMessages([]);
-    setNextCursor(null);
+    // Ne pas effacer les messages pendant le rechargement pour éviter le flash
     fetch(`/api/relations/${relationId}/messages?limit=60`)
       .then((r) => r.json())
       .then((data) => {
@@ -326,6 +327,9 @@ export default function Workspace() {
   }, [relationId]);
 
   useEffect(() => {
+    // Vider les messages immédiatement quand on change de relation
+    setWaMessages([]);
+    setNextCursor(null);
     loadInitial();
   }, [relationId]);
 
@@ -389,19 +393,15 @@ export default function Workspace() {
     }
   }, [waMessages]);
 
-  // Quand WhatsApp passe à "connected", recharge les messages après un court délai
-  // (Baileys a besoin de quelques secondes pour écrire l'historique en DB)
+  // Quand WhatsApp passe à "connected", recharge les messages une fois
+  // (le polling incrémental de 5s prend ensuite le relais)
   const prevLiveStatus = useRef<string>("none");
   useEffect(() => {
     if (waLiveStatus === "connected" && prevLiveStatus.current !== "connected") {
-      // Recharge immédiatement, puis encore après 5s et 15s
-      // pour attraper les messages d'historique qui arrivent en chunks
       loadInitial();
-      const t1 = setTimeout(() => loadInitial(), 5_000);
-      const t2 = setTimeout(() => loadInitial(), 15_000);
-      const t3 = setTimeout(() => loadInitial(), 30_000);
+      const t1 = setTimeout(() => loadInitial(), 8_000);
       prevLiveStatus.current = "connected";
-      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+      return () => { clearTimeout(t1); };
     }
     prevLiveStatus.current = waLiveStatus;
   }, [waLiveStatus]);
@@ -1161,6 +1161,59 @@ export default function Workspace() {
                 ? <Loader2 className="h-4 w-4 animate-spin" />
                 : <ShieldAlert className="h-4 w-4" />}
             </Button>
+            {/* Copier toute la conversation */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full text-muted-foreground"
+              title="Copier la conversation (texte)"
+              onClick={() => {
+                const text = waMessages.map((msg) => {
+                  const time = format(new Date(msg.sentAt), "dd/MM HH:mm");
+                  const sender = msg.isMe ? "Moi" : msg.sender;
+                  const isAud = !!msg.mediaData && msg.mediaData.startsWith("data:audio");
+                  const isImg = !!msg.mediaData && msg.mediaData.startsWith("data:image");
+                  const body = isAud
+                    ? `[Vocal]${msg.content && msg.content !== "[Message vocal]" ? " " + msg.content.replace(/^\[Vocal\] /, "") : ""}`
+                    : isImg
+                    ? `[Image]${msg.content && msg.content !== "[Image]" ? " " + msg.content : ""}`
+                    : msg.content;
+                  return `[${time}] ${sender}: ${body}`;
+                }).join("\n");
+                navigator.clipboard.writeText(text).then(() =>
+                  toast({ title: "Conversation copiée", description: `${waMessages.length} messages dans le presse-papiers` })
+                );
+              }}
+              disabled={waMessages.length === 0}
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
+            {/* Télécharger tous les messages vocaux */}
+            {waMessages.some((m) => m.mediaData?.startsWith("data:audio")) && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full text-muted-foreground"
+                title="Télécharger tous les audios"
+                onClick={() => {
+                  const audios = waMessages.filter((m) => m.mediaData?.startsWith("data:audio"));
+                  audios.forEach((msg, i) => {
+                    setTimeout(() => {
+                      const a = document.createElement("a");
+                      a.href = msg.mediaData!;
+                      const ext = msg.mediaData!.includes("ogg") ? "ogg" : msg.mediaData!.includes("mp4") ? "m4a" : "opus";
+                      a.download = `vocal-${format(new Date(msg.sentAt), "yyyy-MM-dd_HH-mm")}-${i + 1}.${ext}`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    }, i * 400);
+                  });
+                  toast({ title: `${audios.length} audio${audios.length > 1 ? "s" : ""} en téléchargement` });
+                }}
+              >
+                <Download className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1345,12 +1398,33 @@ export default function Workspace() {
                             {!msg.isMe && (
                               <div className="text-[11px] font-semibold text-amber-600">{msg.sender}</div>
                             )}
-                            <audio
-                              controls
-                              src={msg.mediaData}
-                              className="w-full max-w-[260px] h-9"
-                              style={{ colorScheme: msg.isMe ? "dark" : "light" }}
-                            />
+                            <div className="flex items-center gap-1.5">
+                              <audio
+                                controls
+                                src={msg.mediaData!}
+                                className="w-full max-w-[220px] h-9"
+                                style={{ colorScheme: msg.isMe ? "dark" : "light" }}
+                              />
+                              <button
+                                title="Télécharger cet audio"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const a = document.createElement("a");
+                                  a.href = msg.mediaData!;
+                                  const ext = msg.mediaData!.includes("ogg") ? "ogg" : msg.mediaData!.includes("mp4") ? "m4a" : "opus";
+                                  a.download = `vocal-${format(new Date(msg.sentAt), "yyyy-MM-dd_HH-mm")}.${ext}`;
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  document.body.removeChild(a);
+                                }}
+                                className={cn(
+                                  "shrink-0 rounded-full p-1 opacity-60 hover:opacity-100 transition-opacity",
+                                  msg.isMe ? "text-primary-foreground" : "text-muted-foreground"
+                                )}
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                             {msg.content && msg.content !== "[Message vocal]" && (
                               <p className={cn(
                                 "text-[13px] leading-relaxed italic border-l-2 pl-2",
@@ -1397,16 +1471,32 @@ export default function Workspace() {
                         )}
 
                         {/* ── Texte normal ── */}
-                        {!isImage && msg.content !== "[Image]" && (
-                          <>
+                        {!isImage && !isAudio && msg.content !== "[Image]" && (
+                          <div className="group/msg relative">
                             {msg.content}
-                            <div className={cn(
-                              "text-[10px] mt-1.5 text-right",
-                              msg.isMe ? "text-primary-foreground/60" : "text-muted-foreground"
-                            )}>
-                              {format(new Date(msg.sentAt), "HH:mm")}
+                            <div className="flex items-center justify-between mt-1.5 gap-2">
+                              <button
+                                title="Copier ce message"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigator.clipboard.writeText(msg.content);
+                                  toast({ title: "Message copié" });
+                                }}
+                                className={cn(
+                                  "opacity-0 group-hover/msg:opacity-60 hover:!opacity-100 transition-opacity rounded p-0.5",
+                                  msg.isMe ? "text-primary-foreground" : "text-muted-foreground"
+                                )}
+                              >
+                                <Copy className="h-3 w-3" />
+                              </button>
+                              <div className={cn(
+                                "text-[10px] text-right",
+                                msg.isMe ? "text-primary-foreground/60" : "text-muted-foreground"
+                              )}>
+                                {format(new Date(msg.sentAt), "HH:mm")}
+                              </div>
                             </div>
-                          </>
+                          </div>
                         )}
                       </div>
                     </div>
