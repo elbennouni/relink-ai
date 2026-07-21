@@ -443,13 +443,22 @@ async function startSession(relationId: number, contactPhone?: string) {
       // When the user sends a message (fromMe=true) and the remoteJid is a @lid,
       // we know that LID corresponds to this session's contactPhone. Record it
       // immediately so subsequent incoming messages from that LID can be routed.
-      if (jid.includes("@lid") && chatPhone === "") {
+      if (jid.includes("@lid")) {
         const lidUser = jid.split("@")[0].split(":")[0];
         const myContactPhone = session.contactPhone?.replace(/\D/g, "");
-        if (isMe && myContactPhone && !lidToPhone.has(lidUser)) {
+        if (chatPhone === "" && isMe && myContactPhone && !lidToPhone.has(lidUser)) {
           lidToPhone.set(lidUser, myContactPhone);
           saveLidMapping(lidUser, myContactPhone); // persist to DB
           console.log(`[Baileys:${relationId}] Learned LID from outgoing: ${lidUser} → ${myContactPhone} (saved to DB)`);
+        }
+        // ── Auto-heal contactPhone mismatch ──────────────────────────────────
+        // If outgoing messages consistently go to a resolved phone that differs
+        // from the stored contactPhone, the stored value is stale. Update it so
+        // incoming messages from the same LID are routed correctly.
+        if (isMe && chatPhone !== "" && myContactPhone && !phonesMatch(chatPhone, myContactPhone)) {
+          console.log(`[Baileys:${relationId}] Auto-correcting contactPhone: ${myContactPhone} → ${chatPhone}`);
+          session.contactPhone = chatPhone;
+          writeConfig(relationId, { contactPhone: chatPhone });
         }
       }
 
@@ -462,7 +471,9 @@ async function startSession(relationId: number, contactPhone?: string) {
           // resolvedPhone === "" means LID not yet resolved — store optimistically
           await persistMessage(msg, relationId, true, senderPhone, content, mediaData, sentAt);
         } else {
-          console.log(`[Baileys:${relationId}] Own msg skipped — chatPhone=${resolvedPhone} contactPhone=${myContactPhone}`);
+          // Last-resort: this session is the one receiving the event, store it here
+          console.log(`[Baileys:${relationId}] Own msg fallback store — chatPhone=${resolvedPhone} contactPhone=${myContactPhone}`);
+          await persistMessage(msg, relationId, true, senderPhone, content, mediaData, sentAt);
         }
       } else {
         // Incoming message — route to the relation whose contactPhone matches chatPhone.
@@ -487,8 +498,13 @@ async function startSession(relationId: number, contactPhone?: string) {
         }
 
         if (!stored) {
+          // No session matched the resolved phone — fall back to the current session.
+          // This happens when contactPhone is stale (e.g. after re-connecting with a
+          // different number). Storing here prevents message loss; the auto-heal above
+          // will correct contactPhone on the next outgoing message.
           const known = [...sessions.values()].map(s => s.contactPhone?.replace(/\D/g, "") ?? "?").join(", ");
-          console.log(`[Baileys:${relationId}] ⚠ No match — resolvedPhone=${resolvedPhone} jid=${jid} | known: [${known}] | lidMap: ${lidToPhone.size}`);
+          console.log(`[Baileys:${relationId}] ⚠ No match (fallback) — resolvedPhone=${resolvedPhone} | known: [${known}] — storing in current session`);
+          await persistMessage(msg, relationId, false, senderPhone, content, mediaData, sentAt);
         }
       }
     }
