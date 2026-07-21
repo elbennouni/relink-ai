@@ -43,6 +43,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: Fix Metro bundler deps (pnpm workspace compat)
+        working-directory: artifacts/relink-mobile
+        run: |
+          npm install --no-save babel-preset-expo @babel/core @babel/runtime
+
       - name: Expo Prebuild
         working-directory: artifacts/relink-mobile
         env:
@@ -73,7 +78,8 @@ jobs:
             -Pandroid.injected.signing.store.password=relinkpass \
             -Pandroid.injected.signing.key.alias=relink \
             -Pandroid.injected.signing.key.password=relinkpass \
-            --stacktrace 2>&1 | tee /tmp/gradle.log | tail -100
+            --stacktrace 2>&1 | tee /tmp/gradle.log
+          tail -50 /tmp/gradle.log
 
       - name: Find APK
         id: find_apk
