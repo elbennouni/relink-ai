@@ -47,7 +47,7 @@ jobs:
         working-directory: artifacts/relink-mobile
         env:
           EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ
-          EXPO_PUBLIC_DOMAIN: workspace.mikam514.replit.app
+          EXPO_PUBLIC_DOMAIN: ai-agent-tool-mikam514.replit.app
         run: npx expo prebuild --platform android --clean --no-install
 
       - name: Generate keystore
@@ -98,7 +98,7 @@ jobs:
           tag_name: latest-apk
           name: "ReLink AI – APK Android"
           body: |
-            APK signé connecté à workspace.mikam514.replit.app
+            APK signé connecté à ai-agent-tool-mikam514.replit.app
             Construit le ${{ github.run_number }} · commit ${{ github.sha }}
           prerelease: false
           files: ${{ steps.find_apk.outputs.path }}
