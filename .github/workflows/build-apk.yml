@@ -43,15 +43,15 @@ jobs:
           EXPO_PUBLIC_DOMAIN: ${{ secrets.EXPO_PUBLIC_DOMAIN }}
         run: npx expo prebuild --platform android --clean --no-install
 
-      - name: Build APK
+      - name: Build APK (debug)
         working-directory: artifacts/relink-mobile/android
         env:
           GRADLE_OPTS: '-Xmx3g'
-        run: ./gradlew assembleRelease --no-daemon -x lint
+        run: ./gradlew assembleDebug --no-daemon -x lint
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: relink-apk
-          path: artifacts/relink-mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          path: artifacts/relink-mobile/android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
