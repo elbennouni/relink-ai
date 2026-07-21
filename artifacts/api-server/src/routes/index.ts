@@ -17,6 +17,7 @@ import addMessageRouter from "./add_message";
 import scheduleMessageRouter from "./schedule_message";
 import adminRouter from "./admin";
 import powerAnalysisRouter from "./power_analysis";
+import downloadApkRouter from "./download_apk";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireRelationOwnership } from "../middlewares/requireRelationOwnership";
 
@@ -24,6 +25,7 @@ const router: IRouter = Router();
 
 // ── Public routes (no Clerk session required) ─────────────────────────────────
 router.use(healthRouter);
+router.use(downloadApkRouter);
 // Only the Meta webhook challenge + inbound message endpoints are public.
 // The /relations/:id/whatsapp/config endpoints are in the private section below.
 router.use(webhookPublicRouter);

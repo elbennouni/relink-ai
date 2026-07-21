@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "KH5-sz3f3XiTHPWZIz80L"
+uri = "file://relink-ai.apk"
+type = "unspecified"
+title = "ReLink AI – app-debug.apk (200 MB)"
