@@ -29,15 +29,9 @@ import {
   Square,
   Wand2,
   Clock,
-  ChevronDown,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { SuggestRepliesDialog } from "@/components/SuggestRepliesDialog";
+import { ScheduleTimerPopover } from "@/components/ScheduleTimerPopover";
 import { StrategyPanel, type StrategyResult } from "@/components/StrategyPanel";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -1439,37 +1433,10 @@ export default function Workspace() {
             {waDirectInput.trim() && (
               <div className="flex items-center gap-1 shrink-0">
                 {/* Timer de réponse */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-9 w-9 rounded-xl"
-                      title="Programmer l'envoi"
-                      disabled={waSendingDirect}
-                    >
-                      <Clock className="h-4 w-4 text-amber-600" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-52">
-                    <div className="px-2 pt-1.5 pb-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                      Timer de réponse
-                    </div>
-                    {[
-                      { label: "Dans 30 minutes", m: 30 },
-                      { label: "Dans 2 heures", m: 120 },
-                      { label: "Dans 5 heures", m: 300 },
-                    ].map((opt) => (
-                      <DropdownMenuItem
-                        key={opt.m}
-                        onClick={() => handleWaDirectSend(waDirectInput, opt.m)}
-                      >
-                        <Clock className="h-3.5 w-3.5 mr-2 text-amber-500" />
-                        {opt.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <ScheduleTimerPopover
+                  onSchedule={(m) => handleWaDirectSend(waDirectInput, m)}
+                  disabled={waSendingDirect}
+                />
 
                 {/* Send now */}
                 <Button

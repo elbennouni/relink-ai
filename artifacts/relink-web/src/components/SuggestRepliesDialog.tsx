@@ -8,15 +8,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Loader2, Wand2, Copy, CornerDownRight, RefreshCw, Send, SmartphoneNfc, Clock, ChevronDown,
+  Loader2, Wand2, Copy, CornerDownRight, RefreshCw, Send, SmartphoneNfc,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { ScheduleTimerPopover } from "@/components/ScheduleTimerPopover";
 
 type Suggestion = { text: string; label: string; score?: number; scoreLabel?: string };
 type ContextMsg = { sender: string; content: string; isMe: boolean };
@@ -31,12 +26,6 @@ type Props = {
   onPasteToAgent: (text: string) => void;
 };
 
-const DELAY_OPTIONS = [
-  { label: "Envoyer maintenant", minutes: 0 },
-  { label: "Dans 30 minutes", minutes: 30 },
-  { label: "Dans 2 heures", minutes: 120 },
-  { label: "Dans 5 heures", minutes: 300 },
-];
 
 function ScoreBar({ score, label }: { score: number; label?: string }) {
   const color =
@@ -113,7 +102,7 @@ export function SuggestRepliesDialog({
           body: JSON.stringify({ content: text, delayMinutes }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const label = DELAY_OPTIONS.find(o => o.minutes === delayMinutes)?.label ?? "programmé";
+        const label = delayMinutes >= 60 ? `${delayMinutes / 60}h` : `${delayMinutes} min`;
         setScheduled({ i, label });
         setTimeout(() => { setScheduled(null); onClose(); }, 1800);
       } else {
@@ -280,32 +269,12 @@ export function SuggestRepliesDialog({
                       )}
                     </Button>
 
-                    {/* Timer de réponse — dropdown */}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={sending === i}
-                          className="h-8 px-2.5 text-xs rounded-lg gap-1"
-                          title="Programmer l'envoi"
-                        >
-                          <Clock className="h-3.5 w-3.5" />
-                          <ChevronDown className="h-3 w-3" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48">
-                        {DELAY_OPTIONS.slice(1).map((opt) => (
-                          <DropdownMenuItem
-                            key={opt.minutes}
-                            onClick={() => handleSend(s.text, i, opt.minutes)}
-                          >
-                            <Clock className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
-                            {opt.label}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {/* Timer de réponse */}
+                    <ScheduleTimerPopover
+                      compact
+                      disabled={sending === i}
+                      onSchedule={(m) => handleSend(s.text, i, m)}
+                    />
 
                     {/* Copier */}
                     <Button size="sm" variant="outline" onClick={() => handleCopy(s.text, i)} className="h-8 px-3 text-xs rounded-lg">

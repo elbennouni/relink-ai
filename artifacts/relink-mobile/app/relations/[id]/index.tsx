@@ -88,6 +88,9 @@ export default function ConversationScreen() {
   const [sendingText, setSendingText] = useState(false);
   const [pickingImage, setPickingImage] = useState(false);
   const [timerOpen, setTimerOpen] = useState(false);
+  const [customTimerVal, setCustomTimerVal] = useState('');
+  const [customTimerUnit, setCustomTimerUnit] = useState<'min' | 'h'>('min');
+  const [customTimerError, setCustomTimerError] = useState('');
   const inputRef = useRef<TextInput>(null);
 
   const messages = (messageData?.messages ?? []) as Msg[];
@@ -595,39 +598,116 @@ export default function ConversationScreen() {
           activeOpacity={1}
           onPress={() => setTimerOpen(false)}
         >
-          <View style={[styles.timerSheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
-            <Text style={[styles.timerTitle, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>
-              ⏱ Timer de réponse
-            </Text>
-            <Text style={[styles.timerSub, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-              Le message sera envoyé automatiquement
-            </Text>
-            {[
-              { label: 'Dans 30 minutes', minutes: 30 },
-              { label: 'Dans 2 heures', minutes: 120 },
-              { label: 'Dans 5 heures', minutes: 300 },
-            ].map((opt) => (
+          <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+            <View style={[styles.timerSheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+              <Text style={[styles.timerTitle, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>
+                ⏱ Timer de réponse
+              </Text>
+              <Text style={[styles.timerSub, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
+                Le message sera envoyé automatiquement
+              </Text>
+
+              {/* Presets grid */}
+              <View style={styles.timerGrid}>
+                {[
+                  { label: '2 min', minutes: 2 },
+                  { label: '5 min', minutes: 5 },
+                  { label: '15 min', minutes: 15 },
+                  { label: '30 min', minutes: 30 },
+                  { label: '1h', minutes: 60 },
+                  { label: '2h', minutes: 120 },
+                  { label: '5h', minutes: 300 },
+                  { label: '12h', minutes: 720 },
+                  { label: '24h', minutes: 1440 },
+                ].map((opt) => (
+                  <TouchableOpacity
+                    key={opt.minutes}
+                    style={[styles.timerPreset, { borderColor: colors.border, backgroundColor: colors.muted }]}
+                    onPress={() => { setTimerOpen(false); setCustomTimerError(''); handleScheduleSend(inputText, opt.minutes); }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.timerPresetText, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Divider */}
+              <View style={styles.timerDivider}>
+                <View style={[styles.timerDividerLine, { backgroundColor: colors.border }]} />
+                <Text style={[styles.timerDividerText, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
+                  ou personnaliser
+                </Text>
+                <View style={[styles.timerDividerLine, { backgroundColor: colors.border }]} />
+              </View>
+
+              {/* Custom input */}
+              <View style={styles.timerCustomRow}>
+                <TextInput
+                  style={[styles.timerCustomInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background, fontFamily: 'Inter_400Regular' }]}
+                  keyboardType="numeric"
+                  placeholder={customTimerUnit === 'min' ? 'Ex: 45' : 'Ex: 3'}
+                  placeholderTextColor={colors.mutedForeground}
+                  value={customTimerVal}
+                  onChangeText={(t) => { setCustomTimerVal(t); setCustomTimerError(''); }}
+                  maxLength={4}
+                />
+                {/* Unit toggle */}
+                <View style={[styles.timerUnitToggle, { borderColor: colors.border }]}>
+                  {(['min', 'h'] as const).map((u) => (
+                    <TouchableOpacity
+                      key={u}
+                      style={[styles.timerUnitBtn, customTimerUnit === u && { backgroundColor: colors.accent }]}
+                      onPress={() => { setCustomTimerUnit(u); setCustomTimerVal(''); setCustomTimerError(''); }}
+                    >
+                      <Text style={[styles.timerUnitBtnText, { color: customTimerUnit === u ? colors.accentForeground : colors.mutedForeground, fontFamily: 'Inter_500Medium' }]}>
+                        {u}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              {customTimerError ? (
+                <Text style={[styles.timerCustomError, { color: '#ef4444', fontFamily: 'Inter_400Regular' }]}>
+                  {customTimerError}
+                </Text>
+              ) : null}
               <TouchableOpacity
-                key={opt.minutes}
-                style={[styles.timerOption, { borderTopColor: colors.border }]}
-                onPress={() => { setTimerOpen(false); handleScheduleSend(inputText, opt.minutes); }}
-                activeOpacity={0.7}
+                style={[styles.timerCustomConfirm, { backgroundColor: colors.accent, opacity: customTimerVal ? 1 : 0.4 }]}
+                disabled={!customTimerVal}
+                onPress={() => {
+                  const n = parseInt(customTimerVal, 10);
+                  const maxVal = customTimerUnit === 'min' ? 1440 : 24;
+                  const minVal = customTimerUnit === 'min' ? 2 : 1;
+                  if (isNaN(n) || n < minVal || n > maxVal) {
+                    setCustomTimerError(`Entre ${minVal} et ${maxVal} ${customTimerUnit}`);
+                    return;
+                  }
+                  const minutes = customTimerUnit === 'h' ? n * 60 : n;
+                  setTimerOpen(false);
+                  setCustomTimerVal('');
+                  setCustomTimerError('');
+                  handleScheduleSend(inputText, minutes);
+                }}
+                activeOpacity={0.8}
               >
-                <Feather name="clock" size={18} color={colors.accent} style={{ marginRight: 14 }} />
-                <Text style={[styles.timerOptionText, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>
-                  {opt.label}
+                <Feather name="clock" size={16} color={colors.accentForeground} style={{ marginRight: 8 }} />
+                <Text style={[styles.timerCustomConfirmText, { color: colors.accentForeground, fontFamily: 'Inter_600SemiBold' }]}>
+                  Programmer
                 </Text>
               </TouchableOpacity>
-            ))}
-            <TouchableOpacity
-              style={[styles.timerCancel, { borderTopColor: colors.border }]}
-              onPress={() => setTimerOpen(false)}
-            >
-              <Text style={[{ color: colors.mutedForeground, fontFamily: 'Inter_500Medium', fontSize: 15 }]}>
-                Annuler
-              </Text>
-            </TouchableOpacity>
-          </View>
+
+              <TouchableOpacity
+                style={[styles.timerCancel, { borderTopColor: colors.border }]}
+                onPress={() => setTimerOpen(false)}
+              >
+                <Text style={[{ color: colors.mutedForeground, fontFamily: 'Inter_500Medium', fontSize: 15 }]}>
+                  Annuler
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
 
@@ -761,11 +841,40 @@ const styles = StyleSheet.create({
   },
   timerTitle: { fontSize: 18, marginBottom: 4 },
   timerSub: { fontSize: 13, marginBottom: 16 },
-  timerOption: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth,
+  timerGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16,
   },
-  timerOptionText: { fontSize: 16 },
+  timerPreset: {
+    borderWidth: 1, borderRadius: 10,
+    paddingVertical: 8, paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  timerPresetText: { fontSize: 14 },
+  timerDivider: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14,
+  },
+  timerDividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
+  timerDividerText: { fontSize: 12 },
+  timerCustomRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8,
+  },
+  timerCustomInput: {
+    flex: 1, height: 44, borderWidth: 1, borderRadius: 10,
+    paddingHorizontal: 12, fontSize: 15,
+  },
+  timerUnitToggle: {
+    flexDirection: 'row', borderWidth: 1, borderRadius: 10, overflow: 'hidden',
+  },
+  timerUnitBtn: {
+    paddingVertical: 10, paddingHorizontal: 14,
+  },
+  timerUnitBtnText: { fontSize: 14 },
+  timerCustomConfirm: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    height: 44, borderRadius: 10, marginBottom: 8,
+  },
+  timerCustomConfirmText: { fontSize: 15 },
+  timerCustomError: { fontSize: 12, marginBottom: 6 },
   timerCancel: {
     marginTop: 4, paddingVertical: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
