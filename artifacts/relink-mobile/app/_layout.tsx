@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -71,6 +72,17 @@ function ClerkAuthSync() {
 function RootLayoutNav() {
   const router = useRouter();
 
+  // Reset badge count whenever the app comes to the foreground
+  useEffect(() => {
+    Notifications.setBadgeCountAsync(0); // clear on mount (app just opened)
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        Notifications.setBadgeCountAsync(0);
+      }
+    });
+    return () => appStateSub.remove();
+  }, []);
+
   // Navigate to the relation's conversation when user taps a push notification
   useEffect(() => {
     // Handle notification tap when app was in background / foreground
@@ -78,6 +90,7 @@ function RootLayoutNav() {
       const data = response.notification.request.content.data as { relationId?: number };
       if (data?.relationId) {
         router.push(`/relations/${data.relationId}` as any);
+        Notifications.setBadgeCountAsync(0);
       }
     });
 
@@ -87,6 +100,7 @@ function RootLayoutNav() {
       const data = response.notification.request.content.data as { relationId?: number };
       if (data?.relationId) {
         router.push(`/relations/${data.relationId}` as any);
+        Notifications.setBadgeCountAsync(0);
       }
     });
 

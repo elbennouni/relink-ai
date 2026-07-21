@@ -9,8 +9,8 @@
  * the Expo Go / dev-build environment without extra credentials.
  */
 import Expo, { type ExpoPushMessage } from "expo-server-sdk";
-import { db, pushTokensTable, relationsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, pushTokensTable, relationsTable, whatsappMessagesTable } from "@workspace/db";
+import { eq, and, gte, sql } from "drizzle-orm";
 
 const expo = new Expo();
 
@@ -37,6 +37,21 @@ export async function notifyRelationOwner(
 
   const finalTitle = title ?? relation.name ?? "Nouveau message";
 
+  // Count unread incoming messages (last 24h) across all user relations → badge number
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [countResult] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(whatsappMessagesTable)
+    .innerJoin(relationsTable, eq(whatsappMessagesTable.relationId, relationsTable.id))
+    .where(
+      and(
+        eq(relationsTable.userId, relation.userId),
+        eq(whatsappMessagesTable.isMe, false),
+        gte(whatsappMessagesTable.createdAt, since),
+      ),
+    );
+  const badgeCount = Math.max(1, countResult?.count ?? 1);
+
   // Get all push tokens for this user
   const rows = await db
     .select({ token: pushTokensTable.token })
@@ -54,7 +69,7 @@ export async function notifyRelationOwner(
       body,
       data: { relationId, ...data },
       priority: "high" as const,
-      badge: 1,
+      badge: badgeCount,
       channelId: "messages",
     }));
 
