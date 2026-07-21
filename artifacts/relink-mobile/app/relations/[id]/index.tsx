@@ -607,6 +607,17 @@ export default function ConversationScreen() {
                 Le message sera envoyé automatiquement
               </Text>
 
+              {/* Immediate */}
+              <TouchableOpacity
+                style={[styles.timerImmediate, { backgroundColor: '#dcfce7', borderColor: '#86efac' }]}
+                onPress={() => { setTimerOpen(false); setCustomTimerError(''); handleScheduleSend(inputText, 0); }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.timerImmediateText, { color: '#15803d', fontFamily: 'Inter_600SemiBold' }]}>
+                  ⚡ Envoyer maintenant
+                </Text>
+              </TouchableOpacity>
+
               {/* Presets grid */}
               <View style={styles.timerGrid}>
                 {[
@@ -841,6 +852,11 @@ const styles = StyleSheet.create({
   },
   timerTitle: { fontSize: 18, marginBottom: 4 },
   timerSub: { fontSize: 13, marginBottom: 16 },
+  timerImmediate: {
+    borderWidth: 1, borderRadius: 10,
+    paddingVertical: 12, alignItems: 'center', marginBottom: 12,
+  },
+  timerImmediateText: { fontSize: 15 },
   timerGrid: {
     flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16,
   },

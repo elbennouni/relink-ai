@@ -94,6 +94,14 @@ export function ScheduleTimerPopover({ onSchedule, disabled, size = "default", c
           ⏱ Timer de réponse
         </div>
 
+        {/* Immediate */}
+        <button
+          onClick={() => handlePreset(0)}
+          className="w-full text-sm py-2 rounded-lg border border-border bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 font-semibold transition-colors"
+        >
+          ⚡ Envoyer maintenant
+        </button>
+
         {/* Presets grid */}
         <div className="grid grid-cols-3 gap-1.5">
           {PRESETS.map((p) => (
