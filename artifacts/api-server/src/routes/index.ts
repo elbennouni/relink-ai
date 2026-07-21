@@ -18,6 +18,7 @@ import scheduleMessageRouter from "./schedule_message";
 import adminRouter from "./admin";
 import powerAnalysisRouter from "./power_analysis";
 import downloadApkRouter from "./download_apk";
+import sosModeRouter from "./sos_mode";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireRelationOwnership } from "../middlewares/requireRelationOwnership";
 
@@ -54,5 +55,6 @@ router.use(addMessageRouter);
 router.use(scheduleMessageRouter);
 router.use(adminRouter);
 router.use(powerAnalysisRouter);
+router.use(sosModeRouter);
 
 export default router;

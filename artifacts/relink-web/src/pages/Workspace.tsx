@@ -29,6 +29,7 @@ import {
   Square,
   Wand2,
   Clock,
+  ShieldAlert,
 } from "lucide-react";
 import { SuggestRepliesDialog } from "@/components/SuggestRepliesDialog";
 import { ScheduleTimerPopover } from "@/components/ScheduleTimerPopover";
@@ -199,6 +200,36 @@ export default function Workspace() {
     mediaRecorderRef.current = null;
     setIsRecording(false);
   }, []);
+
+  // ── SOS mode ───────────────────────────────────────────────────────────────
+  const [sosActive, setSosActive] = useState(false);
+  const [sosLoading, setSosLoading] = useState(false);
+
+  useEffect(() => {
+    if (!relationId) return;
+    fetch(`/api/relations/${relationId}/sos/status`)
+      .then((r) => r.json())
+      .then((d) => setSosActive(d.active ?? false))
+      .catch(() => {});
+  }, [relationId]);
+
+  const toggleSos = useCallback(async () => {
+    if (sosLoading) return;
+    setSosLoading(true);
+    try {
+      const endpoint = sosActive ? "disable" : "enable";
+      const r = await fetch(`/api/relations/${relationId}/sos/${endpoint}`, { method: "POST" });
+      const d = await r.json();
+      setSosActive(d.active ?? !sosActive);
+      toast({
+        title: d.active ? "🔴 Mode SOS activé" : "Mode SOS désactivé",
+        description: d.active
+          ? "L'IA répond à ta place, froide et détachée. Tu reprends le contrôle."
+          : "Tu reprends les commandes.",
+      });
+    } catch { /* ignore */ }
+    finally { setSosLoading(false); }
+  }, [sosActive, sosLoading, relationId, toast]);
 
   // ── WhatsApp live status (declared here so callbacks below can use it) ───────
   const [waLiveStatus, setWaLiveStatus] = useState<"none" | "connected" | "connecting" | "disconnected">("none");
@@ -1113,8 +1144,36 @@ export default function Workspace() {
             >
               <Wand2 className="h-4 w-4" />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "rounded-full transition-all",
+                sosActive
+                  ? "bg-red-500 text-white hover:bg-red-600 animate-pulse shadow-lg shadow-red-200"
+                  : "text-muted-foreground hover:bg-red-50 hover:text-red-500"
+              )}
+              title={sosActive ? "Mode SOS actif — clic pour désactiver" : "Activer le Mode SOS"}
+              onClick={toggleSos}
+              disabled={sosLoading}
+            >
+              {sosLoading
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <ShieldAlert className="h-4 w-4" />}
+            </Button>
           </div>
         </div>
+
+        {/* SOS mode banner */}
+        {sosActive && (
+          <div className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white text-xs font-medium">
+            <span className="inline-block w-2 h-2 rounded-full bg-white animate-pulse" />
+            Mode SOS actif — L'IA répond à ta place, froide et détachée (délai 20-90 min)
+            <button onClick={toggleSos} className="ml-auto underline hover:no-underline">
+              Désactiver
+            </button>
+          </div>
+        )}
 
         {/* Body — month strip + messages */}
         <div className="flex flex-1 min-h-0">

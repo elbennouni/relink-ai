@@ -83,6 +83,10 @@ export default function ConversationScreen() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
+  // SOS mode
+  const [sosActive, setSosActive] = useState(false);
+  const [sosLoading, setSosLoading] = useState(false);
+
   // Input bar
   const [inputText, setInputText] = useState('');
   const [sendingText, setSendingText] = useState(false);
@@ -99,19 +103,34 @@ export default function ConversationScreen() {
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
-  // Check WhatsApp status
+  // Check WhatsApp + SOS status
   useEffect(() => {
     (async () => {
       try {
         const token = await getToken();
-        const res = await fetch(`https://${domain}/api/relations/${relationId}/whatsapp/status`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        const data = await res.json();
-        setWaConnected(data.status === 'connected');
+        const headers: Record<string,string> = token ? { Authorization: `Bearer ${token}` } : {};
+        const [waRes, sosRes] = await Promise.all([
+          fetch(`https://${domain}/api/relations/${relationId}/whatsapp/status`, { headers }),
+          fetch(`https://${domain}/api/relations/${relationId}/sos/status`, { headers }),
+        ]);
+        const [waData, sosData] = await Promise.all([waRes.json(), sosRes.json()]);
+        setWaConnected(waData.status === 'connected');
+        setSosActive(sosData.active ?? false);
       } catch {}
     })();
   }, [relationId]);
+
+  const toggleSos = useCallback(async () => {
+    if (sosLoading) return;
+    setSosLoading(true);
+    try {
+      const res = await apiFetch(`/api/relations/${relationId}/sos/${sosActive ? 'disable' : 'enable'}`, { method: 'POST' });
+      const data = await res.json();
+      setSosActive(data.active ?? !sosActive);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    } catch {}
+    finally { setSosLoading(false); }
+  }, [sosActive, sosLoading, relationId, apiFetch]);
 
   const apiFetch = useCallback(async (path: string, opts: RequestInit = {}) => {
     const token = await getToken();
@@ -544,6 +563,24 @@ export default function ConversationScreen() {
             activeOpacity={0.7}
           >
             <Feather name="zap" size={20} color={suggestOpen ? colors.accent : colors.mutedForeground} />
+          </TouchableOpacity>
+
+          {/* SOS button */}
+          <TouchableOpacity
+            style={[
+              styles.inputIconBtn,
+              sosActive
+                ? { backgroundColor: '#ef4444', borderRadius: 20 }
+                : { backgroundColor: colors.muted }
+            ]}
+            onPress={toggleSos}
+            disabled={sosLoading}
+            activeOpacity={0.7}
+          >
+            {sosLoading
+              ? <ActivityIndicator size="small" color={sosActive ? '#fff' : colors.mutedForeground} />
+              : <Feather name="shield" size={18} color={sosActive ? '#fff' : colors.mutedForeground} />
+            }
           </TouchableOpacity>
 
           {/* Timer + Send buttons — visible when text present */}

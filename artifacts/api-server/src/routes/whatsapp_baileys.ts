@@ -12,12 +12,13 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import type { WAMessage, ConnectionState } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
-import { db, whatsappMessagesTable, whatsappAccountsTable, whatsappLidMappingsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, whatsappMessagesTable, whatsappAccountsTable, whatsappLidMappingsTable, relationsTable, scheduledMessagesTable } from "@workspace/db";
+import { eq, desc } from "drizzle-orm";
 import { notifyRelationOwner } from "../lib/pushNotifications";
 import path from "path";
 import fs from "fs";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { anthropic } from "@workspace/integrations-anthropic-ai";
 import crypto from "crypto";
 
 const router = Router();
@@ -407,8 +408,72 @@ async function startSession(relationId: number, contactPhone?: string) {
           preview,
           { relationId: targetRelationId },
         ).catch(() => {}); // fire-and-forget
+
+        // SOS mode: auto-generate a cold reply and schedule it
+        triggerSosReply(targetRelationId).catch(() => {});
       }
     } catch { /* ignore constraint errors */ }
+  }
+
+  // ── SOS mode: auto-generate a cold/detached reply and schedule it ──────────
+  async function triggerSosReply(relationId: number) {
+    const [relation] = await db
+      .select()
+      .from(relationsTable)
+      .where(eq(relationsTable.id, relationId))
+      .limit(1);
+
+    if (!relation?.sosMode || !relation.userId) return;
+
+    // Get recent messages for context
+    const recent = await db
+      .select({ sender: whatsappMessagesTable.sender, content: whatsappMessagesTable.content, isMe: whatsappMessagesTable.isMe })
+      .from(whatsappMessagesTable)
+      .where(eq(whatsappMessagesTable.relationId, relationId))
+      .orderBy(desc(whatsappMessagesTable.sentAt))
+      .limit(15);
+    recent.reverse();
+
+    const contextStr = recent
+      .map((m) => `${m.isMe ? "Moi" : relation.participantOther}: ${m.content}`)
+      .join("\n");
+
+    const msg = await anthropic.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 80,
+      messages: [{
+        role: "user",
+        content: `Tu es en MODE SOS. L'utilisateur est trop vulnérable pour répondre lui-même. Tu prends le contrôle total.
+
+RÈGLES ABSOLUES :
+- Maximum 1-2 phrases TRÈS courtes
+- Ton froid, distant, détaché — comme si tu avais mieux à faire
+- ZÉRO empressement, ZÉRO besoin apparent
+- Ne justifie rien, n'explique rien, jamais de questions
+- Quelques mots suffisent souvent
+- Parfois un seul mot est la meilleure réponse
+
+CONVERSATION RÉCENTE :
+${contextStr}
+
+Génère UNIQUEMENT le texte du message à envoyer, sans guillemets, sans explication.`,
+      }],
+    });
+
+    const replyText = (msg.content[0] as { type: string; text: string }).text?.trim();
+    if (!replyText) return;
+
+    // Random delay between 20 and 90 minutes
+    const delayMin = 20 + Math.floor(Math.random() * 71);
+    const scheduledAt = new Date(Date.now() + delayMin * 60 * 1000);
+
+    await db.insert(scheduledMessagesTable).values({
+      userId: relation.userId,
+      relationId,
+      content: replyText,
+      scheduledAt,
+      status: "pending",
+    });
   }
 
   // ── Shared helper : persist a list of WAMessages ─────────────────────────────
