@@ -9,6 +9,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -48,9 +50,6 @@ jobs:
           EXPO_PUBLIC_DOMAIN: workspace.mikam514.replit.app
         run: npx expo prebuild --platform android --clean --no-install
 
-      - name: Show generated build.gradle (debug)
-        run: cat artifacts/relink-mobile/android/app/build.gradle
-
       - name: Generate keystore
         working-directory: artifacts/relink-mobile/android/app
         run: |
@@ -68,23 +67,41 @@ jobs:
         working-directory: artifacts/relink-mobile/android
         env:
           GRADLE_OPTS: '-Xmx4g -XX:MaxMetaspaceSize=512m'
-          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-          EXPO_PUBLIC_DOMAIN: ${{ secrets.EXPO_PUBLIC_DOMAIN }}
         run: |
           ./gradlew assembleRelease --no-daemon -x lint \
             -Pandroid.injected.signing.store.file=$(pwd)/app/relink.keystore \
             -Pandroid.injected.signing.store.password=relinkpass \
             -Pandroid.injected.signing.key.alias=relink \
             -Pandroid.injected.signing.key.password=relinkpass \
-            --stacktrace 2>&1 | tee /tmp/gradle.log | tail -150
-          echo "--- Exit code: $?"
+            --stacktrace 2>&1 | tee /tmp/gradle.log | tail -100
 
-      - name: Upload APK
+      - name: Find APK
+        id: find_apk
+        run: |
+          APK=$(find artifacts/relink-mobile/android -name "*.apk" | head -1)
+          echo "path=$APK" >> $GITHUB_OUTPUT
+          echo "Found APK: $APK"
+          ls -lh "$APK"
+
+      - name: Upload artifact (backup)
         uses: actions/upload-artifact@v4
         with:
           name: relink-apk
-          path: artifacts/relink-mobile/android/app/build/outputs/apk/release/app-release.apk
+          path: ${{ steps.find_apk.outputs.path }}
+          if-no-files-found: error
           retention-days: 14
+
+      - name: Create / update GitHub Release with APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-apk
+          name: "ReLink AI – APK Android"
+          body: |
+            APK signé connecté à workspace.mikam514.replit.app
+            Construit le ${{ github.run_number }} · commit ${{ github.sha }}
+          prerelease: false
+          files: ${{ steps.find_apk.outputs.path }}
+          make_latest: true
 
       - name: Upload Gradle log on failure
         if: failure()
