@@ -28,10 +28,8 @@ jobs:
       - name: Install pnpm
         run: npm install -g pnpm@9
 
-      - name: Patch pnpm-workspace for CI (disable minimumReleaseAge)
-        run: |
-          sed -i 's/^minimumReleaseAge:.*/minimumReleaseAge: 0/' pnpm-workspace.yaml
-          grep minimumReleaseAge pnpm-workspace.yaml
+      - name: Patch pnpm-workspace for CI
+        run: sed -i 's/^minimumReleaseAge:.*/minimumReleaseAge: 0/' pnpm-workspace.yaml
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
@@ -43,15 +41,44 @@ jobs:
           EXPO_PUBLIC_DOMAIN: ${{ secrets.EXPO_PUBLIC_DOMAIN }}
         run: npx expo prebuild --platform android --clean --no-install
 
-      - name: Build APK (debug)
+      - name: Generate keystore
+        run: |
+          keytool -genkey -v \
+            -keystore relink.keystore \
+            -alias relink \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass relinkpass \
+            -keypass relinkpass \
+            -dname "CN=ReLink AI, OU=Mobile, O=ReLink, L=Paris, S=IDF, C=FR"
+          mv relink.keystore artifacts/relink-mobile/android/app/relink.keystore
+
+      - name: Configure signing in build.gradle
+        working-directory: artifacts/relink-mobile/android/app
+        run: |
+          cat >> build.gradle << 'GRADLE_EOF'
+
+          android.signingConfigs {
+            release {
+              storeFile file("relink.keystore")
+              storePassword "relinkpass"
+              keyAlias "relink"
+              keyPassword "relinkpass"
+            }
+          }
+          android.buildTypes.release.signingConfig = android.signingConfigs.release
+          GRADLE_EOF
+
+      - name: Build signed release APK
         working-directory: artifacts/relink-mobile/android
         env:
           GRADLE_OPTS: '-Xmx3g'
-        run: ./gradlew assembleDebug --no-daemon -x lint
+        run: ./gradlew assembleRelease --no-daemon -x lint
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: relink-apk
-          path: artifacts/relink-mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          path: artifacts/relink-mobile/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
