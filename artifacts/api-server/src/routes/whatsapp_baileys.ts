@@ -463,8 +463,23 @@ Génère UNIQUEMENT le texte du message à envoyer, sans guillemets, sans explic
     const replyText = (msg.content[0] as { type: string; text: string }).text?.trim();
     if (!replyText) return;
 
-    // Random delay between 20 and 90 minutes
-    const delayMin = 20 + Math.floor(Math.random() * 71);
+    // Strategic delay — alternates unpredictably to create power imbalance:
+    //  30% → immédiat (0-3 min)   — montre que tu réponds QUAND tu veux
+    //  25% → court (20-60 min)    — occupé mais pas urgent
+    //  25% → moyen (2-5h)         — clairement pas disponible
+    //  20% → long (6-14h)         — tu as une vie, ça attendra
+    const roll = Math.random();
+    let delayMin: number;
+    if (roll < 0.30) {
+      delayMin = Math.floor(Math.random() * 4);                    // 0-3 min
+    } else if (roll < 0.55) {
+      delayMin = 20 + Math.floor(Math.random() * 41);              // 20-60 min
+    } else if (roll < 0.80) {
+      delayMin = 120 + Math.floor(Math.random() * 181);            // 2h-5h
+    } else {
+      delayMin = 360 + Math.floor(Math.random() * 480);            // 6h-14h
+    }
+
     const scheduledAt = new Date(Date.now() + delayMin * 60 * 1000);
 
     await db.insert(scheduledMessagesTable).values({
