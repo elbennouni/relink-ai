@@ -26,18 +26,17 @@ jobs:
           java-version: '17'
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        run: npm install -g pnpm@9
 
-      # Remove minimumReleaseAge restriction — CI uses pinned lockfile so it's safe
-      - name: Patch pnpm workspace for CI
-        run: sed -i 's/minimumReleaseAge:.*/minimumReleaseAge: 0/' pnpm-workspace.yaml
+      - name: Patch pnpm-workspace for CI (disable minimumReleaseAge)
+        run: |
+          sed -i 's/^minimumReleaseAge:.*/minimumReleaseAge: 0/' pnpm-workspace.yaml
+          grep minimumReleaseAge pnpm-workspace.yaml
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Expo Prebuild (Android)
+      - name: Expo Prebuild
         working-directory: artifacts/relink-mobile
         env:
           EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY }}
@@ -46,9 +45,9 @@ jobs:
 
       - name: Build APK
         working-directory: artifacts/relink-mobile/android
-        run: ./gradlew assembleRelease --no-daemon -x lint
         env:
           GRADLE_OPTS: '-Xmx3g'
+        run: ./gradlew assembleRelease --no-daemon -x lint
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
