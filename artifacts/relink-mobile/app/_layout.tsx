@@ -19,10 +19,10 @@ import { ClerkProvider, ClerkLoaded, useAuth } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
 import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 
-// Set API base URL — fallback to known dev domain if env var not embedded at build time
+// Set API base URL — use production domain by default so the APK always works
 const domain =
   process.env.EXPO_PUBLIC_DOMAIN ||
-  '10dcbdee-7c63-4ec2-ba84-86b58a4613a4-00-3kqb7l0xk54fo.spock.replit.dev';
+  'workspace.mikam514.replit.app';
 setBaseUrl(`https://${domain}`);
 
 // Fallback Clerk key so the app never freezes on startup with a missing key

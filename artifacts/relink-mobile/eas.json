@@ -15,7 +15,7 @@
       },
       "env": {
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ",
-        "EXPO_PUBLIC_DOMAIN": "10dcbdee-7c63-4ec2-ba84-86b58a4613a4-00-3kqb7l0xk54fo.spock.replit.dev"
+        "EXPO_PUBLIC_DOMAIN": "workspace.mikam514.replit.app"
       }
     },
     "preview": {
@@ -25,14 +25,14 @@
       },
       "env": {
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ",
-        "EXPO_PUBLIC_DOMAIN": "10dcbdee-7c63-4ec2-ba84-86b58a4613a4-00-3kqb7l0xk54fo.spock.replit.dev"
+        "EXPO_PUBLIC_DOMAIN": "workspace.mikam514.replit.app"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ",
-        "EXPO_PUBLIC_DOMAIN": "10dcbdee-7c63-4ec2-ba84-86b58a4613a4-00-3kqb7l0xk54fo.spock.replit.dev"
+        "EXPO_PUBLIC_DOMAIN": "workspace.mikam514.replit.app"
       }
     }
   },
