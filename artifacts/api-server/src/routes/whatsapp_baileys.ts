@@ -485,16 +485,12 @@ Génère uniquement le texte du message, sans guillemets ni explication.`,
 
     const scheduledAt = new Date(Date.now() + delayMin * 60 * 1000);
 
-    // Insert as "pending-approval" so the user sees a confirmation popup
-    // before the message is actually sent.  The scheduled sender job ignores
-    // "pending-approval" rows — they only become "pending" (and thus sendable)
-    // when the user explicitly clicks "Envoyer" in the UI.
     await db.insert(scheduledMessagesTable).values({
       userId: relation.userId,
       relationId,
       content: replyText,
       scheduledAt,
-      status: "pending-approval",
+      status: "pending",
     });
   }
 
