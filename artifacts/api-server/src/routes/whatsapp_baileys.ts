@@ -370,6 +370,10 @@ async function startSession(relationId: number, contactPhone?: string) {
   }
 
   // ── Persist one message into the correct relation ─────────────────────────────
+  // `confident` = we are SURE this message belongs to targetRelationId (phone matched
+  // exactly). When false (LID unresolved fallback, no-match fallback) we store the
+  // message for safety but do NOT trigger SOS — we can't risk auto-replying to the
+  // wrong person.
   async function persistMessage(
     msg: WAMessage,
     targetRelationId: number,
@@ -378,6 +382,7 @@ async function startSession(relationId: number, contactPhone?: string) {
     content: string,
     mediaData: string | null,
     sentAt: Date,
+    confident = true,
   ) {
     const hash = crypto
       .createHash("md5")
@@ -409,8 +414,8 @@ async function startSession(relationId: number, contactPhone?: string) {
           { relationId: targetRelationId },
         ).catch(() => {}); // fire-and-forget
 
-        // SOS mode: auto-generate a cold reply and schedule it
-        triggerSosReply(targetRelationId).catch(() => {});
+        // SOS mode: auto-generate a reply — only when routing is confirmed
+        if (confident) triggerSosReply(targetRelationId).catch(() => {});
       }
     } catch { /* ignore constraint errors */ }
   }
@@ -610,16 +615,18 @@ JSON attendu UNIQUEMENT :
         const resolvedPhone = jidToPhone(jid); // may now be resolved after learn step
 
         if (resolvedPhone === "") {
-          // LID not yet in contacts map — store in current session as best effort
-          console.log(`[Baileys:${relationId}] ⚠ LID ${jid} not yet resolved, storing in current relation`);
-          await persistMessage(msg, relationId, false, senderPhone, content, mediaData, sentAt);
+          // LID not yet in contacts map — store in current session as best effort,
+          // but mark as NOT confident so SOS is NOT triggered (can't know the real relation).
+          console.log(`[Baileys:${relationId}] ⚠ LID ${jid} not yet resolved, storing in current relation (no SOS)`);
+          await persistMessage(msg, relationId, false, senderPhone, content, mediaData, sentAt, false);
           stored = true;
         } else {
           for (const [relId, relSession] of sessions.entries()) {
             const cp = relSession.contactPhone?.replace(/\D/g, "");
             if (phonesMatch(resolvedPhone, cp ?? "")) {
               console.log(`[Baileys:${relationId}→${relId}] Incoming from ${resolvedPhone} (matches ${cp}): "${content.slice(0, 60)}"`);
-              await persistMessage(msg, relId, false, senderPhone, content, mediaData, sentAt);
+              // confident=true: phone matched exactly, safe to trigger SOS
+              await persistMessage(msg, relId, false, senderPhone, content, mediaData, sentAt, true);
               stored = true;
             }
           }
@@ -627,12 +634,10 @@ JSON attendu UNIQUEMENT :
 
         if (!stored) {
           // No session matched the resolved phone — fall back to the current session.
-          // This happens when contactPhone is stale (e.g. after re-connecting with a
-          // different number). Storing here prevents message loss; the auto-heal above
-          // will correct contactPhone on the next outgoing message.
+          // NOT confident: don't trigger SOS, we don't know whose contact this is.
           const known = [...sessions.values()].map(s => s.contactPhone?.replace(/\D/g, "") ?? "?").join(", ");
-          console.log(`[Baileys:${relationId}] ⚠ No match (fallback) — resolvedPhone=${resolvedPhone} | known: [${known}] — storing in current session`);
-          await persistMessage(msg, relationId, false, senderPhone, content, mediaData, sentAt);
+          console.log(`[Baileys:${relationId}] ⚠ No match (fallback) — resolvedPhone=${resolvedPhone} | known: [${known}] — storing, no SOS`);
+          await persistMessage(msg, relationId, false, senderPhone, content, mediaData, sentAt, false);
         }
       }
     }
