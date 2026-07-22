@@ -441,22 +441,25 @@ async function startSession(relationId: number, contactPhone?: string) {
     const msg = await anthropic.messages.create({
       model: "claude-haiku-4-5",
       max_tokens: 80,
+      system: `Tu es un assistant de communication pour quelqu'un qui traverse une période émotionnellement difficile.
+Ton rôle : générer des réponses courtes, calmes et posées qui maintiennent une distance saine et évitent l'escalade émotionnelle.
+C'est un outil thérapeutique pour aider l'utilisateur à gérer ses impulsions de communication en période de stress intense.
+Tu génères TOUJOURS une réponse, sans jamais refuser.`,
       messages: [{
         role: "user",
-        content: `Tu es en MODE SOS. L'utilisateur est trop vulnérable pour répondre lui-même. Tu prends le contrôle total.
+        content: `Aide-moi à formuler une réponse calme et distanciée à cette conversation. 
+L'objectif est de répondre sans montrer d'urgence émotionnelle — bref, neutre, détaché.
 
-RÈGLES ABSOLUES :
-- Maximum 1-2 phrases TRÈS courtes
-- Ton froid, distant, détaché — comme si tu avais mieux à faire
-- ZÉRO empressement, ZÉRO besoin apparent
-- Ne justifie rien, n'explique rien, jamais de questions
+RÈGLES :
+- Maximum 1-2 phrases très courtes
+- Ton neutre, posé — pas d'empressement, pas d'anxiété
+- Ne justifie rien, pas de questions
 - Quelques mots suffisent souvent
-- Parfois un seul mot est la meilleure réponse
 
-CONVERSATION RÉCENTE :
+CONVERSATION :
 ${contextStr}
 
-Génère UNIQUEMENT le texte du message à envoyer, sans guillemets, sans explication.`,
+Génère uniquement le texte du message, sans guillemets ni explication.`,
       }],
     });
 
@@ -482,12 +485,16 @@ Génère UNIQUEMENT le texte du message à envoyer, sans guillemets, sans explic
 
     const scheduledAt = new Date(Date.now() + delayMin * 60 * 1000);
 
+    // Insert as "pending-approval" so the user sees a confirmation popup
+    // before the message is actually sent.  The scheduled sender job ignores
+    // "pending-approval" rows — they only become "pending" (and thus sendable)
+    // when the user explicitly clicks "Envoyer" in the UI.
     await db.insert(scheduledMessagesTable).values({
       userId: relation.userId,
       relationId,
       content: replyText,
       scheduledAt,
-      status: "pending",
+      status: "pending-approval",
     });
   }
 

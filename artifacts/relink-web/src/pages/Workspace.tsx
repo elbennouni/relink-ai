@@ -154,6 +154,11 @@ export default function Workspace() {
   const [waSendingDirect, setWaSendingDirect] = useState(false);
   const [scheduledPending, setScheduledPending] = useState<Array<{ id: number; content: string; scheduledAt: string }>>([]);
 
+  // ── SOS pending-approval popup ─────────────────────────────────────────────
+  type SosDraft = { id: number; content: string; scheduledAt: string };
+  const [sosDraft, setSosDraft] = useState<SosDraft | null>(null);
+  const [sosApproving, setSosApproving] = useState(false);
+
   // ── Analyse stratégique message entrant ────────────────────────────────────
   const [strategyResult, setStrategyResult] = useState<StrategyResult | null>(null);
   const [strategyLoading, setStrategyLoading] = useState(false);
@@ -214,6 +219,44 @@ export default function Workspace() {
       .then((d) => setSosActive(d.active ?? false))
       .catch(() => {});
   }, [relationId]);
+
+  // Poll every 20s for a pending-approval SOS draft
+  useEffect(() => {
+    if (!relationId) return;
+    const poll = () => {
+      fetch(`/api/relations/${relationId}/messages/sos-pending`)
+        .then((r) => r.json())
+        .then((d) => setSosDraft(d.pendingApproval ?? null))
+        .catch(() => {});
+    };
+    poll();
+    const t = setInterval(poll, 20_000);
+    return () => clearInterval(t);
+  }, [relationId]);
+
+  const approveSosDraft = useCallback(async () => {
+    if (!sosDraft) return;
+    setSosApproving(true);
+    try {
+      await fetch(`/api/relations/${relationId}/messages/scheduled/${sosDraft.id}/approve`, { method: "POST" });
+      setSosDraft(null);
+      loadScheduled();
+      toast({ title: "✅ Message SOS approuvé", description: "Il sera envoyé à l'heure programmée." });
+    } catch {
+      toast({ title: "Erreur", description: "Impossible d'approuver.", variant: "destructive" });
+    } finally { setSosApproving(false); }
+  }, [sosDraft, relationId, toast, loadScheduled]);
+
+  const cancelSosDraft = useCallback(async () => {
+    if (!sosDraft) return;
+    try {
+      await fetch(`/api/relations/${relationId}/messages/scheduled/${sosDraft.id}/cancel-sos`, { method: "POST" });
+      setSosDraft(null);
+      toast({ title: "Message SOS annulé", description: "Tu réponds toi-même." });
+    } catch {
+      toast({ title: "Erreur", variant: "destructive" });
+    }
+  }, [sosDraft, relationId, toast]);
 
   const toggleSos = useCallback(async () => {
     if (sosLoading) return;
@@ -349,6 +392,11 @@ export default function Workspace() {
     if (!trimmed || waSendingDirect) return;
     setWaSendingDirect(true);
     setWaDirectInput("");
+    // L'utilisateur répond lui-même → annuler tout brouillon SOS en attente
+    if (sosDraft) {
+      fetch(`/api/relations/${relationId}/messages/scheduled/${sosDraft.id}/cancel-sos`, { method: "POST" }).catch(() => {});
+      setSosDraft(null);
+    }
     try {
       if (delayMinutes > 0) {
         await fetch(`/api/relations/${relationId}/messages/schedule`, {
@@ -380,7 +428,7 @@ export default function Workspace() {
     } finally {
       setWaSendingDirect(false);
     }
-  }, [waSendingDirect, relationId, waLiveStatus, toast, loadInitial, loadScheduled]);
+  }, [waSendingDirect, sosDraft, relationId, waLiveStatus, toast, loadInitial, loadScheduled]);
 
   // ── Live refresh : nouveaux messages quand WhatsApp est connecté ───────────
   const newestSentAtRef = useRef<string | null>(null);
@@ -1293,10 +1341,44 @@ export default function Workspace() {
         {sosActive && (
           <div className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white text-xs font-medium">
             <span className="inline-block w-2 h-2 rounded-full bg-white animate-pulse" />
-            Mode SOS actif — L'IA répond à ta place, froide et détachée (délai 20-90 min)
+            Mode SOS actif — L'IA prépare une réponse calme à ta place
             <button onClick={toggleSos} className="ml-auto underline hover:no-underline">
               Désactiver
             </button>
+          </div>
+        )}
+
+        {/* ── SOS brouillon en attente d'approbation ── */}
+        {sosDraft && (
+          <div className="mx-4 my-2 rounded-xl border-2 border-red-400 bg-red-50 dark:bg-red-950/30 dark:border-red-700 p-4 shadow-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-xs font-semibold text-red-700 dark:text-red-400 uppercase tracking-wide">
+                Message SOS prêt — à toi de décider
+              </span>
+            </div>
+            <p className="text-sm text-foreground mb-3 bg-white dark:bg-background rounded-lg px-3 py-2 border border-red-200 dark:border-red-800 font-medium">
+              "{sosDraft.content}"
+            </p>
+            <div className="text-xs text-muted-foreground mb-3">
+              Prévu pour : {new Date(sosDraft.scheduledAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={approveSosDraft}
+                disabled={sosApproving}
+                className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold py-2 px-4 rounded-lg transition-colors"
+              >
+                {sosApproving ? "Envoi…" : "✓ Envoyer ce message"}
+              </button>
+              <button
+                onClick={cancelSosDraft}
+                disabled={sosApproving}
+                className="flex-1 bg-muted hover:bg-muted/80 text-foreground text-sm font-semibold py-2 px-4 rounded-lg border transition-colors"
+              >
+                ✕ Je réponds moi-même
+              </button>
+            </div>
           </div>
         )}
 

@@ -79,6 +79,83 @@ router.delete("/relations/:id/messages/scheduled/:msgId", async (req, res) => {
   res.json({ ok: true });
 });
 
+// GET /api/relations/:id/messages/sos-pending
+// Returns the oldest pending-approval SOS message waiting for confirmation.
+router.get("/relations/:id/messages/sos-pending", async (req, res) => {
+  const auth = getAuth(req);
+  const userId = auth?.userId;
+  if (!userId) { res.status(401).json({ error: "unauthorized" }); return; }
+
+  const relationId = Number(req.params.id);
+  if (isNaN(relationId)) { res.status(400).json({ error: "invalid id" }); return; }
+
+  const msgs = await db.select().from(scheduledMessagesTable).where(
+    and(
+      eq(scheduledMessagesTable.userId, userId),
+      eq(scheduledMessagesTable.relationId, relationId),
+      eq(scheduledMessagesTable.status, "pending-approval"),
+    )
+  ).orderBy(desc(scheduledMessagesTable.createdAt)).limit(1);
+
+  res.json({ pendingApproval: msgs[0] ?? null });
+});
+
+// POST /api/relations/:id/messages/scheduled/:msgId/approve
+// User confirms: move from pending-approval → pending (will be sent by the job)
+router.post("/relations/:id/messages/scheduled/:msgId/approve", async (req, res) => {
+  const auth = getAuth(req);
+  const userId = auth?.userId;
+  if (!userId) { res.status(401).json({ error: "unauthorized" }); return; }
+
+  const msgId = Number(req.params.msgId);
+  if (isNaN(msgId)) { res.status(400).json({ error: "invalid msgId" }); return; }
+
+  await db.update(scheduledMessagesTable).set({ status: "pending" }).where(
+    and(
+      eq(scheduledMessagesTable.id, msgId),
+      eq(scheduledMessagesTable.userId, userId),
+      eq(scheduledMessagesTable.status, "pending-approval"),
+    )
+  );
+
+  res.json({ ok: true });
+});
+
+// POST /api/relations/:id/messages/scheduled/:msgId/cancel-sos
+// User dismisses: cancel a pending-approval SOS message
+router.post("/relations/:id/messages/scheduled/:msgId/cancel-sos", async (req, res) => {
+  const auth = getAuth(req);
+  const userId = auth?.userId;
+  if (!userId) { res.status(401).json({ error: "unauthorized" }); return; }
+
+  const msgId = Number(req.params.msgId);
+  if (isNaN(msgId)) { res.status(400).json({ error: "invalid msgId" }); return; }
+
+  await db.update(scheduledMessagesTable).set({ status: "cancelled" }).where(
+    and(
+      eq(scheduledMessagesTable.id, msgId),
+      eq(scheduledMessagesTable.userId, userId),
+      eq(scheduledMessagesTable.status, "pending-approval"),
+    )
+  );
+
+  res.json({ ok: true });
+});
+
+// Helper exported for other routes: cancel all pending-approval SOS messages
+// for a relation when the user decides to reply manually.
+export async function cancelSosPendingApproval(relationId: number, userId: string) {
+  await db.update(scheduledMessagesTable)
+    .set({ status: "cancelled" })
+    .where(
+      and(
+        eq(scheduledMessagesTable.userId, userId),
+        eq(scheduledMessagesTable.relationId, relationId),
+        eq(scheduledMessagesTable.status, "pending-approval"),
+      )
+    );
+}
+
 // ─── Background sender job ────────────────────────────────────────────────────
 export function startScheduledMessageJob() {
   const run = async () => {

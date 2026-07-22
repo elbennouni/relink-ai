@@ -87,6 +87,11 @@ export default function ConversationScreen() {
   const [sosActive, setSosActive] = useState(false);
   const [sosLoading, setSosLoading] = useState(false);
 
+  // SOS brouillon en attente d'approbation
+  type SosDraft = { id: number; content: string; scheduledAt: string };
+  const [sosDraft, setSosDraft] = useState<SosDraft | null>(null);
+  const [sosApproving, setSosApproving] = useState(false);
+
   // Input bar
   const [inputText, setInputText] = useState('');
   const [sendingText, setSendingText] = useState(false);
@@ -103,6 +108,15 @@ export default function ConversationScreen() {
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
+  // apiFetch doit être déclaré EN PREMIER — tous les hooks ci-dessous en dépendent
+  const apiFetch = useCallback(async (path: string, opts: RequestInit = {}) => {
+    const token = await getToken();
+    return fetch(`https://${domain}${path}`, {
+      ...opts,
+      headers: { ...(opts.headers ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+  }, [getToken]);
+
   // Check WhatsApp + SOS status
   useEffect(() => {
     (async () => {
@@ -118,7 +132,42 @@ export default function ConversationScreen() {
         setSosActive(sosData.active ?? false);
       } catch {}
     })();
-  }, [relationId]);
+  }, [relationId, getToken]);
+
+  // Poll every 20s for a pending-approval SOS draft
+  useEffect(() => {
+    if (!relationId) return;
+    const poll = async () => {
+      try {
+        const res = await apiFetch(`/api/relations/${relationId}/messages/sos-pending`);
+        const data = await res.json();
+        setSosDraft(data.pendingApproval ?? null);
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 20_000);
+    return () => clearInterval(t);
+  }, [relationId, apiFetch]);
+
+  const approveSosDraft = useCallback(async () => {
+    if (!sosDraft || sosApproving) return;
+    setSosApproving(true);
+    try {
+      await apiFetch(`/api/relations/${relationId}/messages/scheduled/${sosDraft.id}/approve`, { method: 'POST' });
+      setSosDraft(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+    finally { setSosApproving(false); }
+  }, [sosDraft, sosApproving, relationId, apiFetch]);
+
+  const cancelSosDraft = useCallback(async () => {
+    if (!sosDraft) return;
+    try {
+      await apiFetch(`/api/relations/${relationId}/messages/scheduled/${sosDraft.id}/cancel-sos`, { method: 'POST' });
+      setSosDraft(null);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch {}
+  }, [sosDraft, relationId, apiFetch]);
 
   const toggleSos = useCallback(async () => {
     if (sosLoading) return;
@@ -131,14 +180,6 @@ export default function ConversationScreen() {
     } catch {}
     finally { setSosLoading(false); }
   }, [sosActive, sosLoading, relationId, apiFetch]);
-
-  const apiFetch = useCallback(async (path: string, opts: RequestInit = {}) => {
-    const token = await getToken();
-    return fetch(`https://${domain}${path}`, {
-      ...opts,
-      headers: { ...(opts.headers ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    });
-  }, [getToken]);
 
   // ─── Navigation ───────────────────────────────────────────────────────────
 
@@ -216,6 +257,11 @@ export default function ConversationScreen() {
     if (!text || sendingText) return;
     setSendingText(true);
     setInputText('');
+    // L'utilisateur répond lui-même → annuler tout brouillon SOS en attente
+    if (sosDraft) {
+      apiFetch(`/api/relations/${relationId}/messages/scheduled/${sosDraft.id}/cancel-sos`, { method: 'POST' }).catch(() => {});
+      setSosDraft(null);
+    }
     try {
       if (waConnected) {
         await apiFetch(`/api/relations/${relationId}/whatsapp/send`, {
@@ -236,7 +282,7 @@ export default function ConversationScreen() {
     } finally {
       setSendingText(false);
     }
-  }, [inputText, sendingText, waConnected, relationId, apiFetch, refetch]);
+  }, [inputText, sendingText, sosDraft, waConnected, relationId, apiFetch, refetch]);
 
   const handlePickImage = useCallback(async () => {
     if (pickingImage) return;
@@ -759,6 +805,64 @@ export default function ConversationScreen() {
         </TouchableOpacity>
       </Modal>
 
+      {/* ── Modal de confirmation SOS ── */}
+      <Modal
+        visible={!!sosDraft}
+        transparent
+        animationType="slide"
+        onRequestClose={cancelSosDraft}
+      >
+        <View style={styles.sosOverlay}>
+          <View style={[styles.sosSheet, { backgroundColor: colors.card, borderTopColor: '#ef4444' }]}>
+            {/* Indicateur + titre */}
+            <View style={styles.sosHeader}>
+              <View style={styles.sosDot} />
+              <Text style={[styles.sosTitle, { color: '#ef4444', fontFamily: 'Inter_600SemiBold' }]}>
+                Message SOS prêt — à toi de décider
+              </Text>
+            </View>
+
+            {/* Texte du brouillon */}
+            <View style={[styles.sosDraftBox, { backgroundColor: colors.background, borderColor: '#fca5a5' }]}>
+              <Text style={[styles.sosDraftText, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>
+                "{sosDraft?.content}"
+              </Text>
+            </View>
+
+            {/* Heure prévue */}
+            {sosDraft && (
+              <Text style={[styles.sosTime, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
+                Prévu : {new Date(sosDraft.scheduledAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}
+              </Text>
+            )}
+
+            {/* Boutons */}
+            <TouchableOpacity
+              style={[styles.sosApproveBtn, { backgroundColor: '#ef4444', opacity: sosApproving ? 0.6 : 1 }]}
+              onPress={approveSosDraft}
+              disabled={sosApproving}
+              activeOpacity={0.8}
+            >
+              {sosApproving
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={[styles.sosBtnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>✓ Envoyer ce message</Text>
+              }
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.sosCancelBtn, { borderColor: colors.border, backgroundColor: colors.muted }]}
+              onPress={cancelSosDraft}
+              disabled={sosApproving}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.sosBtnText, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>
+                ✕ Je réponds moi-même
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Lightbox */}
       {lightboxUri && (
         <TouchableOpacity style={styles.lightbox} onPress={() => setLightboxUri(null)} activeOpacity={1}>
@@ -933,6 +1037,31 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
   },
+
+  /* SOS approval modal */
+  sosOverlay: {
+    flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  sosSheet: {
+    borderTopWidth: 3, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20, gap: 14,
+  },
+  sosHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sosDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#ef4444' },
+  sosTitle: { fontSize: 14, flex: 1 },
+  sosDraftBox: {
+    borderWidth: 1, borderRadius: 12, padding: 14,
+  },
+  sosDraftText: { fontSize: 16, lineHeight: 24 },
+  sosTime: { fontSize: 12 },
+  sosApproveBtn: {
+    borderRadius: 12, paddingVertical: 14, alignItems: 'center', justifyContent: 'center',
+  },
+  sosCancelBtn: {
+    borderRadius: 12, paddingVertical: 14, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1,
+  },
+  sosBtnText: { fontSize: 15 },
 
   /* Lightbox */
   lightbox: {
