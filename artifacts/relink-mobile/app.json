@@ -38,8 +38,7 @@
     },
     "plugins": [
       [
-        "expo-updates",
-      "expo-router",
+        "expo-router",
         {
           "origin": "https://replit.com/"
         }
