@@ -76,14 +76,6 @@ jobs:
           EXPO_PUBLIC_DOMAIN: ai-agent-tool-mikam514.replit.app
         run: npx expo prebuild --platform android --clean --no-install
 
-      - name: Enable swap (extend RAM for Gradle)
-        run: |
-          sudo fallocate -l 6G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
-
       - name: Generate keystore
         working-directory: artifacts/relink-mobile/android/app
         run: |
@@ -100,7 +92,7 @@ jobs:
       - name: Build signed release APK
         working-directory: artifacts/relink-mobile/android
         env:
-          GRADLE_OPTS: -Xmx4g -XX:MaxMetaspaceSize=4g
+          GRADLE_OPTS: -Xmx4g
         run: |
           ./gradlew assembleRelease --no-daemon -x lint \
             --build-cache \
