@@ -13,7 +13,7 @@ import makeWASocket, {
 import type { WAMessage, ConnectionState } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import { db, whatsappMessagesTable, whatsappAccountsTable, whatsappLidMappingsTable, relationsTable, scheduledMessagesTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, gte } from "drizzle-orm";
 import { notifyRelationOwner } from "../lib/pushNotifications";
 import path from "path";
 import fs from "fs";
@@ -415,7 +415,7 @@ async function startSession(relationId: number, contactPhone?: string) {
     } catch { /* ignore constraint errors */ }
   }
 
-  // ── SOS mode: auto-generate a cold/detached reply and schedule it ──────────
+  // ── SOS mode: auto-generate a human-like reply and schedule it ──────────────
   async function triggerSosReply(relationId: number) {
     const [relation] = await db
       .select()
@@ -425,63 +425,96 @@ async function startSession(relationId: number, contactPhone?: string) {
 
     if (!relation?.sosMode || !relation.userId) return;
 
-    // Get recent messages for context
-    const recent = await db
-      .select({ sender: whatsappMessagesTable.sender, content: whatsappMessagesTable.content, isMe: whatsappMessagesTable.isMe })
+    // ── Protection rafale : ne générer qu'une seule réponse SOS par fenêtre de 30 min ──
+    // Si un message SOS est déjà en attente pour cette relation, on ignore.
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const existing = await db
+      .select({ id: scheduledMessagesTable.id })
+      .from(scheduledMessagesTable)
+      .where(
+        and(
+          eq(scheduledMessagesTable.relationId, relationId),
+          eq(scheduledMessagesTable.status, "pending"),
+          gte(scheduledMessagesTable.createdAt, thirtyMinAgo),
+        )
+      )
+      .limit(1);
+    if (existing.length > 0) return; // une réponse est déjà programmée, on ne surenchérit pas
+
+    // ── Récupère les 40 derniers messages pour le contexte et le style ──────────
+    const allRecent = await db
+      .select({
+        content: whatsappMessagesTable.content,
+        isMe: whatsappMessagesTable.isMe,
+        sentAt: whatsappMessagesTable.sentAt,
+      })
       .from(whatsappMessagesTable)
       .where(eq(whatsappMessagesTable.relationId, relationId))
       .orderBy(desc(whatsappMessagesTable.sentAt))
-      .limit(15);
-    recent.reverse();
+      .limit(40);
+    allRecent.reverse();
 
-    const contextStr = recent
-      .map((m) => `${m.isMe ? "Moi" : relation.participantOther}: ${m.content}`)
+    // Style d'écriture : les 15 derniers messages envoyés par l'utilisateur
+    const myMessages = allRecent.filter((m) => m.isMe).slice(-15);
+    const styleExamples = myMessages.map((m) => `- "${m.content}"`).join("\n");
+
+    // Conversation récente (les 20 derniers messages, tous expéditeurs)
+    const recentContext = allRecent.slice(-20);
+    const contextStr = recentContext
+      .map((m) => `${m.isMe ? relation.participantMe || "Moi" : relation.participantOther}: ${m.content}`)
       .join("\n");
+
+    // Compte combien de messages consécutifs l'autre a envoyés sans réponse (rafale)
+    let burstCount = 0;
+    for (let i = allRecent.length - 1; i >= 0; i--) {
+      if (!allRecent[i].isMe) burstCount++;
+      else break;
+    }
 
     const msg = await anthropic.messages.create({
       model: "claude-haiku-4-5",
-      max_tokens: 80,
-      system: `Tu es un assistant de communication pour quelqu'un qui traverse une période émotionnellement difficile.
-Ton rôle : générer des réponses courtes, calmes et posées qui maintiennent une distance saine et évitent l'escalade émotionnelle.
-C'est un outil thérapeutique pour aider l'utilisateur à gérer ses impulsions de communication en période de stress intense.
-Tu génères TOUJOURS une réponse, sans jamais refuser.`,
+      max_tokens: 300,
+      system: `Tu aides quelqu'un à gérer une situation émotionnellement intense avec une ancienne relation.
+Tu dois générer une réponse authentique qui ressemble EXACTEMENT à sa façon naturelle d'écrire, ET décider du bon moment pour répondre selon la tension de la conversation.
+Tu réponds TOUJOURS en JSON valide, sans aucun texte autour.`,
       messages: [{
         role: "user",
-        content: `Aide-moi à formuler une réponse calme et distanciée à cette conversation. 
-L'objectif est de répondre sans montrer d'urgence émotionnelle — bref, neutre, détaché.
+        content: `Voici comment ${relation.participantMe || "moi"} écrit normalement dans cette conversation :
+${styleExamples || "(pas encore de messages envoyés)"}
 
-RÈGLES :
-- Maximum 1-2 phrases très courtes
-- Ton neutre, posé — pas d'empressement, pas d'anxiété
-- Ne justifie rien, pas de questions
-- Quelques mots suffisent souvent
-
-CONVERSATION :
+CONVERSATION RÉCENTE (${burstCount > 1 ? `⚠️ ${burstCount} messages en rafale sans réponse` : "situation normale"}) :
 ${contextStr}
 
-Génère uniquement le texte du message, sans guillemets ni explication.`,
+Ta mission :
+1. Écris UN message court qui répond à la situation — calme, posé, sûr de soi. Imite EXACTEMENT le style d'écriture ci-dessus (abréviations, majuscules, ponctuations, longueur typique, etc.).
+2. Décide du délai optimal en minutes selon la tension :
+   - Conversation calme → 0 à 5 min (réponse quasi-immédiate, naturelle)
+   - Légère tension → 20 à 90 min (occupé, pas urgent)
+   - Forte tension ou rafale → 120 à 480 min (2h-8h, pour laisser retomber la pression)
+   - Crise / messages agressifs → 600 à 1440 min (10h-24h, lendemain)
+
+Réponds UNIQUEMENT avec ce JSON :
+{"message":"le texte du message","delay_minutes":30}`,
       }],
     });
 
-    const replyText = (msg.content[0] as { type: string; text: string }).text?.trim();
-    if (!replyText) return;
+    const raw = (msg.content[0] as { type: string; text: string }).text?.trim() ?? "";
 
-    // Strategic delay — alternates unpredictably to create power imbalance:
-    //  30% → immédiat (0-3 min)   — montre que tu réponds QUAND tu veux
-    //  25% → court (20-60 min)    — occupé mais pas urgent
-    //  25% → moyen (2-5h)         — clairement pas disponible
-    //  20% → long (6-14h)         — tu as une vie, ça attendra
-    const roll = Math.random();
+    // Parse JSON — robuste aux backticks ou texte parasite autour
+    let replyText: string;
     let delayMin: number;
-    if (roll < 0.30) {
-      delayMin = Math.floor(Math.random() * 4);                    // 0-3 min
-    } else if (roll < 0.55) {
-      delayMin = 20 + Math.floor(Math.random() * 41);              // 20-60 min
-    } else if (roll < 0.80) {
-      delayMin = 120 + Math.floor(Math.random() * 181);            // 2h-5h
-    } else {
-      delayMin = 360 + Math.floor(Math.random() * 480);            // 6h-14h
+    try {
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(jsonMatch?.[0] ?? raw);
+      replyText = String(parsed.message ?? "").trim();
+      delayMin  = Math.max(0, Math.min(1440, Number(parsed.delay_minutes) || 0));
+    } catch {
+      // Fallback si le JSON est malformé : utilise le texte brut avec délai court
+      replyText = raw.replace(/^\{.*?\}$/s, "").trim() || raw;
+      delayMin  = 30;
     }
+
+    if (!replyText) return;
 
     const scheduledAt = new Date(Date.now() + delayMin * 60 * 1000);
 
@@ -492,6 +525,8 @@ Génère uniquement le texte du message, sans guillemets ni explication.`,
       scheduledAt,
       status: "pending",
     });
+
+    console.log(`[SOS] Relation ${relationId} — réponse programmée dans ${delayMin} min : "${replyText.slice(0, 60)}"`);
   }
 
   // ── Shared helper : persist a list of WAMessages ─────────────────────────────
