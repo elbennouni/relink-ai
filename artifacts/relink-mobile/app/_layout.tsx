@@ -27,9 +27,19 @@ const BASE = `https://${domain}`;
 setBaseUrl(BASE);
 
 // Dev fallback key (pk_test_). At runtime we fetch the real key from /api/config
-// so the correct live key is used in production without needing a separate secret.
+// so the correct live key (pk_live_) is used in production.
 const FALLBACK_KEY = 'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ';
 const proxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined;
+
+// Kick off the fetch at module load time so it's ready as soon as possible.
+// ClerkProvider will NOT render until this promise resolves, avoiding a
+// race condition where Clerk inits with pk_test_ and then gets the wrong key.
+const clerkKeyPromise: Promise<string> = fetch(`${BASE}/api/config`)
+  .then(r => r.json())
+  .then((cfg: { clerkPublishableKey?: string }) =>
+    cfg.clerkPublishableKey?.startsWith('pk_') ? cfg.clerkPublishableKey : FALLBACK_KEY
+  )
+  .catch(() => FALLBACK_KEY);
 
 SplashScreen.preventAutoHideAsync();
 
@@ -141,19 +151,12 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
-  // Fetch the correct Clerk publishable key from the API server.
-  // This ensures the live key (pk_live_) is used in production without
-  // needing a separate EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY secret.
-  const [publishableKey, setPublishableKey] = useState(FALLBACK_KEY);
+  // Wait for the Clerk publishable key from /api/config before rendering.
+  // ClerkProvider must NOT mount until we have the definitive key — if it
+  // starts with pk_test_ and the server uses sk_live_, every request is 401.
+  const [publishableKey, setPublishableKey] = useState<string | null>(null);
   useEffect(() => {
-    fetch(`${BASE}/api/config`)
-      .then(r => r.json())
-      .then((cfg: { clerkPublishableKey?: string }) => {
-        if (cfg.clerkPublishableKey && cfg.clerkPublishableKey.startsWith('pk_')) {
-          setPublishableKey(cfg.clerkPublishableKey);
-        }
-      })
-      .catch(() => { /* keep fallback */ });
+    clerkKeyPromise.then(setPublishableKey);
   }, []);
 
   useEffect(() => {
@@ -162,7 +165,8 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
-  if (!fontsLoaded && !fontError) return null;
+  // Block render until both fonts AND the Clerk key are ready.
+  if ((!fontsLoaded && !fontError) || !publishableKey) return null;
 
   return (
     <ClerkProvider
