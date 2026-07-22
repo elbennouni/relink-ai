@@ -781,6 +781,78 @@ export default function Workspace() {
     [isStreaming, activeSessionId, relationId, toast]
   );
 
+  // ── Send recent window to agent (2h / 24h / 48h) ──────────────────────────
+  const sendRecentToAgent = useCallback(
+    async (label: string, hours: number) => {
+      if (isStreaming || !activeSessionId) return;
+      const key = `recent-${hours}h`;
+      setMonthLoading(key);
+      setActiveMonth(key);
+
+      try {
+        const now = new Date();
+        const cutoff = new Date(now.getTime() - hours * 60 * 60 * 1000);
+
+        // Collect the month(s) we need to cover (handles spanning a month boundary)
+        const monthKeys = new Set<string>();
+        monthKeys.add(`${now.getFullYear()}-${now.getMonth() + 1}`);
+        if (
+          cutoff.getMonth() !== now.getMonth() ||
+          cutoff.getFullYear() !== now.getFullYear()
+        ) {
+          monthKeys.add(`${cutoff.getFullYear()}-${cutoff.getMonth() + 1}`);
+        }
+
+        let allMsgs: WaMessage[] = [];
+        for (const ym of monthKeys) {
+          const [y, mo] = ym.split("-").map(Number);
+          const data = await fetch(
+            `/api/relations/${relationId}/messages?year=${y}&month=${mo}&limit=2000`
+          ).then((r) => r.json());
+          allMsgs = [...allMsgs, ...(data.messages ?? [])];
+        }
+
+        const msgs = allMsgs
+          .filter((m) => new Date(m.sentAt) >= cutoff)
+          .sort(
+            (a, b) =>
+              new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime()
+          );
+
+        if (!msgs.length) {
+          toast({
+            title: "Aucun message récent",
+            description: `Aucun échange dans les ${label}.`,
+            variant: "destructive",
+          });
+          setMonthLoading(null);
+          return;
+        }
+
+        const formatted = msgs
+          .map((m) => {
+            const time = format(new Date(m.sentAt), "dd/MM HH:mm");
+            return `[${time}] ${m.sender}: ${m.content}`;
+          })
+          .join("\n");
+
+        const fromStr = format(cutoff, "dd/MM à HH:mm", { locale: fr });
+        const prompt = `Analyse les ${msgs.length} messages des ${label} (depuis ${fromStr}). Quelles tensions, dynamiques et moments clés ressortent sur cette période ?`;
+
+        await sendMessageDirect(prompt, formatted);
+      } catch {
+        toast({
+          title: "Erreur",
+          description: "Impossible de charger les messages récents.",
+          variant: "destructive",
+        });
+      } finally {
+        setMonthLoading(null);
+      }
+    },
+    [isStreaming, activeSessionId, relationId, toast]
+  );
+
   // ── Send message (direct, bypasses paste state) ────────────────────────────
   const sendMessageDirect = useCallback(
     async (text: string, injectedContext?: string) => {
@@ -1235,6 +1307,44 @@ export default function Workspace() {
           {months.length > 0 && (
             <div className="hidden md:flex flex-col w-14 border-r bg-background/60 overflow-y-auto shrink-0">
               <div className="py-2 px-1 space-y-0.5">
+
+                {/* ── Quick recent-window buttons ── */}
+                {(
+                  [
+                    { key: "recent-2h",  label: "2h",  hours: 2,  title: "2 dernières heures" },
+                    { key: "recent-24h", label: "24h", hours: 24, title: "Dernière journée" },
+                    { key: "recent-48h", label: "48h", hours: 48, title: "2 derniers jours" },
+                  ] as const
+                ).map(({ key, label, hours, title }) => {
+                  const isActive   = activeMonth === key;
+                  const isSpinning = monthLoading === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => sendRecentToAgent(title, hours)}
+                      disabled={isStreaming || !!monthLoading}
+                      title={`Analyser : ${title}`}
+                      className={cn(
+                        "w-full flex flex-col items-center py-2 px-1 rounded-lg text-center transition-all",
+                        isActive
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                        (isStreaming || !!monthLoading) && !isSpinning && "opacity-40 cursor-not-allowed"
+                      )}
+                    >
+                      {isSpinning ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Clock className="h-3 w-3 mb-0.5" />
+                      )}
+                      <span className="text-[10px] font-semibold leading-none">{label}</span>
+                    </button>
+                  );
+                })}
+
+                {/* divider */}
+                <div className="border-t border-border/40 my-1" />
+
                 {months.map((m) => {
                   const key = `${m.year}-${m.month}`;
                   const isActive = activeMonth === key;
