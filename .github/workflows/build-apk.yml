@@ -92,7 +92,7 @@ jobs:
       - name: Build signed release APK
         working-directory: artifacts/relink-mobile/android
         env:
-          GRADLE_OPTS: '-Xmx4g -XX:MaxMetaspaceSize=512m'
+          GRADLE_OPTS: '-Xmx3g -XX:MaxMetaspaceSize=2g -XX:+HeapDumpOnOutOfMemoryError'
         run: |
           ./gradlew assembleRelease --no-daemon -x lint \
             --build-cache \
