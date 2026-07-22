@@ -5,7 +5,7 @@ import {
   whatsappMessagesTable,
   relationalMemoryTable,
 } from "@workspace/db";
-import { eq, count, max } from "drizzle-orm";
+import { eq, count, max, sql } from "drizzle-orm";
 import { z } from "zod";
 
 const router = Router();
@@ -16,19 +16,25 @@ const createRelationBody = z.object({
   participantOther: z.string().min(1),
 });
 
-// GET /api/relations — only current user's relations (+ auto-claim legacy null-userId rows)
+// GET /api/relations — only current user's relations
 router.get("/relations", async (req, res) => {
   const userId = (req as any).userId as string;
 
-  // Return only relations that explicitly belong to this user.
-  // Legacy null-userId relations are not exposed here — users must explicitly
-  // claim them via POST /api/admin/claim-legacy.
   console.log(`[DEBUG] GET /api/relations userId="${userId}"`);
-  const relations = await db
-    .select()
-    .from(relationsTable)
-    .where(eq(relationsTable.userId, userId))
-    .orderBy(relationsTable.createdAt);
+
+  // Use raw SQL to bypass any potential Drizzle ORM column mapping issue
+  const rawRelations = await db.execute(sql`
+    SELECT id, name, participant_me, participant_other, status, sos_mode, created_at, updated_at
+    FROM relations
+    WHERE user_id = ${userId}
+    ORDER BY created_at ASC
+  `);
+
+  const relations = rawRelations.rows as Array<{
+    id: number; name: string; participant_me: string; participant_other: string;
+    status: string; sos_mode: boolean; created_at: Date; updated_at: Date;
+  }>;
+
   console.log(`[DEBUG] relations count=${relations.length} ids=${relations.map(r=>r.id).join(',')}`);
 
   const enriched = await Promise.all(
@@ -52,13 +58,13 @@ router.get("/relations", async (req, res) => {
       return {
         id: r.id,
         name: r.name,
-        participantMe: r.participantMe,
-        participantOther: r.participantOther,
+        participantMe: r.participant_me,
+        participantOther: r.participant_other,
         status: r.status,
         messageCount: msgCount?.count ?? 0,
         lastMessageAt: lastMsg?.sentAt ?? null,
         memoryBuiltAt: mem?.builtAt ?? null,
-        createdAt: r.createdAt,
+        createdAt: r.created_at,
       };
     })
   );
