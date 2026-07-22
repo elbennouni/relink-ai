@@ -37,8 +37,11 @@ router.post("/admin/delete-relations", async (req, res) => {
   }
   const { ids } = req.body as { ids: number[] };
   if (!ids || !ids.length) return res.status(400).json({ error: "Missing ids" });
+  // Use safe integer-only literal to avoid ANY() parameterization issues
+  const safeIds = ids.filter(n => Number.isInteger(n) && n > 0).join(",");
+  if (!safeIds) return res.status(400).json({ error: "Invalid ids" });
   try {
-    const r = await db.execute(sql`DELETE FROM relations WHERE id = ANY(${ids})`);
+    const r = await db.execute(sql.raw(`DELETE FROM relations WHERE id IN (${safeIds})`));
     return res.json({ ok: true, deleted: r.rowCount });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
