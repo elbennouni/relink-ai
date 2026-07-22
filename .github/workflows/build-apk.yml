@@ -30,6 +30,32 @@ jobs:
       - name: Install pnpm
         run: npm install -g pnpm@9
 
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: Cache Gradle wrapper + caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('artifacts/relink-mobile/android/**/*.gradle*', 'artifacts/relink-mobile/android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Cache Android build-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/build-cache
+          key: android-build-cache-${{ runner.os }}-${{ hashFiles('artifacts/relink-mobile/android/**/*.gradle*') }}
+          restore-keys: |
+            android-build-cache-${{ runner.os }}-
+
       - name: Disable minimumReleaseAge for CI
         run: |
           node -e "
@@ -69,6 +95,7 @@ jobs:
           GRADLE_OPTS: '-Xmx4g -XX:MaxMetaspaceSize=512m'
         run: |
           ./gradlew assembleRelease --no-daemon -x lint \
+            --build-cache \
             -Pandroid.injected.signing.store.file=$(pwd)/app/relink.keystore \
             -Pandroid.injected.signing.store.password=relinkpass \
             -Pandroid.injected.signing.key.alias=relink \
