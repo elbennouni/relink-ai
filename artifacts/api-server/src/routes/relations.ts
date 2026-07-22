@@ -23,11 +23,13 @@ router.get("/relations", async (req, res) => {
   // Return only relations that explicitly belong to this user.
   // Legacy null-userId relations are not exposed here — users must explicitly
   // claim them via POST /api/admin/claim-legacy.
+  console.log(`[DEBUG] GET /api/relations userId="${userId}"`);
   const relations = await db
     .select()
     .from(relationsTable)
     .where(eq(relationsTable.userId, userId))
     .orderBy(relationsTable.createdAt);
+  console.log(`[DEBUG] relations count=${relations.length} ids=${relations.map(r=>r.id).join(',')}`);
 
   const enriched = await Promise.all(
     relations.map(async (r) => {
