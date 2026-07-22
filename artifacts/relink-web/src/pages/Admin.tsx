@@ -3,7 +3,7 @@ import { useUser } from "@clerk/react";
 import { Redirect } from "wouter";
 import {
   Users, BarChart2, Tag, Search, ChevronLeft, ChevronRight,
-  Shield, Zap, CheckCircle2, XCircle, Trash2, Crown, RefreshCw
+  Shield, Zap, CheckCircle2, XCircle, Trash2, Crown, RefreshCw, FlaskConical
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -59,7 +59,23 @@ export default function Admin() {
   const [offer, setOffer] = useState<any>(null);
 
   const isAdmin = !!(user?.publicMetadata as any)?.isAdmin;
+  const myIsPremium = !!(user?.publicMetadata as any)?.isPremium;
   if (!isAdmin) return <Redirect to="/" />;
+
+  const toggleMyPremium = async () => {
+    if (!user) return;
+    try {
+      const r = await fetch(`/api/admin/users/${user.id}/metadata`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isPremium: !myIsPremium }),
+      });
+      if (r.ok) {
+        await user.reload();
+        toast({ title: myIsPremium ? "Premium désactivé (mode test)" : "Premium activé" });
+      }
+    } catch { toast({ title: "Erreur", variant: "destructive" }); }
+  };
 
   const loadStats = useCallback(async () => {
     try {
@@ -146,13 +162,28 @@ export default function Admin() {
             <p className="text-xs text-muted-foreground">Panneau de contrôle</p>
           </div>
         </div>
-        <button
-          onClick={() => { loadStats(); if (tab === "users") loadUsers(page); }}
-          className="p-2 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground"
-          title="Rafraîchir"
-        >
-          <RefreshCw className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleMyPremium}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors",
+              myIsPremium
+                ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                : "border-border bg-muted/50 text-muted-foreground hover:bg-muted"
+            )}
+            title="Activer/désactiver le premium sur ton compte (test)"
+          >
+            <FlaskConical className="w-3.5 h-3.5" />
+            {myIsPremium ? "Premium ON" : "Premium OFF"}
+          </button>
+          <button
+            onClick={() => { loadStats(); if (tab === "users") loadUsers(page); }}
+            className="p-2 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground"
+            title="Rafraîchir"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}

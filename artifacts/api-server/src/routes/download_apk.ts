@@ -1,58 +1,34 @@
 import { Router } from "express";
 import fs from "fs";
-import path from "path";
 
 const router = Router();
 
 const APK_CACHE = "/tmp/relink-ai.apk";
 
+// EAS build URL — update this after each new build
+const EAS_APK_URL =
+  "https://expo.dev/artifacts/eas/aewTgiNz7O81oOOYoW5oMhjM4rpgSa9dgjSc3in68c4.apk";
+
 async function fetchAndCacheApk(): Promise<void> {
-  const token = process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
-  if (!token) throw new Error("No GitHub token");
+  const res = await fetch(EAS_APK_URL, { redirect: "follow" });
+  if (!res.ok || !res.body) throw new Error(`EAS fetch failed: ${res.status}`);
 
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-  };
-
-  // Get redirect URL for the artifact zip
-  const res = await fetch(
-    "https://api.github.com/repos/elbennouni/relink-ai/actions/artifacts/8502305785/zip",
-    { headers, redirect: "manual" }
-  );
-
-  const redirectUrl = res.headers.get("location");
-  if (!redirectUrl) throw new Error("No redirect URL from GitHub");
-
-  // Download the zip
-  const zipRes = await fetch(redirectUrl);
-  if (!zipRes.ok || !zipRes.body) throw new Error("Failed to download zip");
-
-  const zipPath = "/tmp/relink-apk.zip";
   const { createWriteStream } = await import("fs");
   const { pipeline } = await import("stream/promises");
   const { Readable } = await import("stream");
 
-  const writer = createWriteStream(zipPath);
+  const writer = createWriteStream(APK_CACHE);
   // @ts-ignore
-  await pipeline(Readable.fromWeb(zipRes.body), writer);
-
-  // Extract APK from zip
-  const { execSync } = await import("child_process");
-  execSync(`unzip -o ${zipPath} -d /tmp/apk_extract`, { stdio: "pipe" });
-  execSync(`mv /tmp/apk_extract/app-debug.apk ${APK_CACHE}`, { stdio: "pipe" });
-  execSync(`rm -rf /tmp/apk_extract ${zipPath}`, { stdio: "pipe" });
+  await pipeline(Readable.fromWeb(res.body), writer);
 }
 
 // Public download route — no auth required
 router.get("/download/apk", async (req, res) => {
   try {
-    // Use cached file if available
     if (!fs.existsSync(APK_CACHE)) {
       res.setHeader("Content-Type", "text/plain");
-      res.write("Préparation de l'APK en cours, réessaie dans 60 secondes...\n");
+      res.write("Préparation de l'APK en cours, réessaie dans 60 secondes…\n");
       res.end();
-      // Trigger async download for next request
       fetchAndCacheApk().catch(console.error);
       return;
     }
@@ -68,7 +44,7 @@ router.get("/download/apk", async (req, res) => {
   }
 });
 
-// Trigger pre-caching on startup
+// Pre-cache on startup
 fetchAndCacheApk().catch(() => {
   console.log("[APK] Cache will be populated on first request");
 });

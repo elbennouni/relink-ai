@@ -17,7 +17,9 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.relinkapp.mobile",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -39,12 +41,13 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "2694d1c3-db72-4f24-85eb-e05d470fb2b1"
+        "projectId": "d237d405-027c-4c5b-aad7-62157de0d65a"
       }
     },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "owner": "mikam516"
   }
 }
