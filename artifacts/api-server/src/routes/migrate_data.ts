@@ -10,6 +10,23 @@ import { sql } from "drizzle-orm";
 const router = Router();
 const SECRET = "relink-migrate-2026-secret";
 
+// Fix user_id in production DB
+router.post("/admin/fix-user-id", async (req, res) => {
+  if (req.headers["x-migrate-secret"] !== SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const { oldUserId, newUserId } = req.body as { oldUserId: string; newUserId: string };
+  if (!oldUserId || !newUserId) return res.status(400).json({ error: "Missing oldUserId or newUserId" });
+  try {
+    const r1 = await db.execute(sql`UPDATE relations SET user_id = ${newUserId} WHERE user_id = ${oldUserId}`);
+    const r2 = await db.execute(sql`UPDATE scheduled_messages SET user_id = ${newUserId} WHERE user_id = ${oldUserId}`);
+    const r3 = await db.execute(sql`UPDATE push_tokens SET user_id = ${newUserId} WHERE user_id = ${oldUserId}`);
+    return res.json({ ok: true, relations: r1.rowCount, scheduled: r2.rowCount, pushTokens: r3.rowCount });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 router.post("/admin/migrate-data", async (req, res) => {
   if (req.headers["x-migrate-secret"] !== SECRET) {
     return res.status(403).json({ error: "Forbidden" });
