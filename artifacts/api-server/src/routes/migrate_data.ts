@@ -7,6 +7,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
+import { requireAuth } from "../middlewares/requireAuth";
 
 const router = Router();
 const SECRET = "relink-migrate-2026-secret";
@@ -244,6 +245,43 @@ router.post("/admin/auto-fix-user", async (req, res) => {
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }
+});
+
+/**
+ * POST /api/migrate/claim-data
+ * Authenticated self-service migration: moves ALL relations (and scheduled messages)
+ * from any other userId in the DB to the currently signed-in user.
+ * Only works when the caller has 0 existing relations — prevents accidental overwrites.
+ * Safe for a personal app where there is one real owner.
+ */
+router.post("/migrate/claim-data", requireAuth, async (req, res) => {
+  const currentUserId = (req as any).userId as string;
+  if (!currentUserId) return res.status(401).json({ error: "Not authenticated" });
+
+  // Refuse if the current user already has data
+  const mine = await db.execute(sql`SELECT id FROM relations WHERE user_id = ${currentUserId} LIMIT 1`);
+  if ((mine.rowCount ?? 0) > 0) {
+    return res.status(400).json({ error: "Vous avez déjà des relations — pas besoin de migrer.", alreadyHasData: true });
+  }
+
+  // Find other userIds that have data
+  const others = await db.execute(sql`
+    SELECT DISTINCT user_id FROM relations WHERE user_id IS NOT NULL AND user_id != ${currentUserId}
+  `);
+  if ((others.rowCount ?? 0) === 0) {
+    return res.status(404).json({ error: "Aucune donnée à récupérer." });
+  }
+
+  // Reassign all relations and messages to current user
+  const updated = await db.execute(sql`
+    UPDATE relations SET user_id = ${currentUserId} WHERE user_id != ${currentUserId}
+  `);
+  await db.execute(sql`
+    UPDATE scheduled_messages SET user_id = ${currentUserId} WHERE user_id != ${currentUserId}
+  `).catch(() => {}); // best-effort
+
+  console.log(`[Migrate] claim-data: ${updated.rowCount} relations → ${currentUserId}`);
+  return res.json({ ok: true, claimed: updated.rowCount });
 });
 
 export default router;

@@ -1,7 +1,7 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  RefreshControl, Platform, ActivityIndicator,
+  RefreshControl, Platform, ActivityIndicator, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import { Feather } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { useListRelations } from '@workspace/api-client-react';
 import * as Haptics from 'expo-haptics';
+import { useAuth } from '@clerk/expo';
 
 function greeting() {
   const h = new Date().getHours();
@@ -30,11 +31,16 @@ function formatRelativeDate(dateStr: string | null | undefined) {
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 }
 
+const domain =
+  process.env.EXPO_PUBLIC_DOMAIN || 'ai-agent-tool-mikam514.replit.app';
+
 export default function HomeScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { data: relations, isLoading, refetch, isRefetching } = useListRelations();
+  const { getToken } = useAuth();
+  const [claiming, setClaiming] = useState(false);
 
   const handleNewRelation = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -46,6 +52,44 @@ export default function HomeScreen() {
     router.push(`/relations/${id}`);
   }, [router]);
 
+  // ── Récupérer les données d'un ancien compte ─────────────────────────────
+  const handleClaimData = useCallback(async () => {
+    Alert.alert(
+      'Récupérer mes données',
+      'Cela va transférer toutes les relations existantes vers votre compte actuel. Continuer ?',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Récupérer',
+          style: 'default',
+          onPress: async () => {
+            setClaiming(true);
+            try {
+              const token = await getToken();
+              const res = await fetch(`https://${domain}/api/migrate/claim-data`, {
+                method: 'POST',
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              });
+              const data = await res.json();
+              if (data.ok) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                await refetch();
+              } else if (data.alreadyHasData) {
+                await refetch();
+              } else {
+                Alert.alert('Erreur', data.error ?? 'Impossible de récupérer les données.');
+              }
+            } catch {
+              Alert.alert('Erreur', 'Connexion impossible. Vérifiez votre connexion internet.');
+            } finally {
+              setClaiming(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [getToken, refetch]);
+
   const styles = makeStyles(colors, insets);
 
   const renderEmpty = () => (
@@ -55,10 +99,26 @@ export default function HomeScreen() {
       </View>
       <Text style={styles.emptyTitle}>Aucune relation</Text>
       <Text style={styles.emptySubtitle}>
-        Commencez par créer une relation pour analyser vos conversations.
+        Commencez par créer une relation ou récupérez vos données existantes.
       </Text>
       <TouchableOpacity style={styles.emptyButton} onPress={handleNewRelation} activeOpacity={0.8}>
         <Text style={styles.emptyButtonText}>Créer une relation</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.claimButton, { borderColor: colors.border, backgroundColor: colors.card }]}
+        onPress={handleClaimData}
+        activeOpacity={0.8}
+        disabled={claiming}
+      >
+        {claiming
+          ? <ActivityIndicator size="small" color={colors.mutedForeground} />
+          : <>
+              <Feather name="download" size={14} color={colors.mutedForeground} style={{ marginRight: 6 }} />
+              <Text style={[styles.claimButtonText, { color: colors.mutedForeground }]}>
+                Récupérer mes données existantes
+              </Text>
+            </>
+        }
       </TouchableOpacity>
     </View>
   );
@@ -296,6 +356,19 @@ function makeStyles(colors: ReturnType<typeof useColors>, insets: ReturnType<typ
       fontSize: 15,
       fontFamily: 'Inter_600SemiBold',
       color: colors.primaryForeground,
+    },
+    claimButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 4,
+      paddingHorizontal: 20,
+      paddingVertical: 11,
+      borderRadius: 24,
+      borderWidth: 1,
+    },
+    claimButtonText: {
+      fontSize: 14,
+      fontFamily: 'Inter_400Regular',
     },
   });
 }
