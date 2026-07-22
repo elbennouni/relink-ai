@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@clerk/expo';
 import { PowerBalanceBar } from '@/app/components/PowerBalanceBar';
 import { SuggestRepliesPopup } from '@/app/components/SuggestRepliesPopup';
+import { SosPendingToast } from '@/app/components/SosPendingToast';
 
 const domain = process.env.EXPO_PUBLIC_DOMAIN ?? '';
 
@@ -768,6 +769,14 @@ export default function ConversationScreen() {
             <Feather name="x" size={22} color="#fff" />
           </TouchableOpacity>
         </TouchableOpacity>
+      )}
+
+      {/* SOS pending toast — appears above input bar when a reply is queued */}
+      {sosActive && (
+        <SosPendingToast
+          relationId={relationId}
+          bottomOffset={bottomPad + 72}
+        />
       )}
     </KeyboardAvoidingView>
   );

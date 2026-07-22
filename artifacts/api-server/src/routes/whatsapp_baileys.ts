@@ -471,30 +471,40 @@ async function startSession(relationId: number, contactPhone?: string) {
       else break;
     }
 
+    // ── Rafale : si l'autre a envoyé >2 messages consécutifs, forcer réponse courte + 2 min ──
+    const isBurst = burstCount > 2;
+
+    // Les derniers messages reçus (pour répondre précisément à ce qu'ils ont dit)
+    const lastTheirMsgs = allRecent
+      .filter((m) => !m.isMe)
+      .slice(-5)
+      .map((m) => `  • "${m.content}"`)
+      .join("\n");
+
     const msg = await anthropic.messages.create({
       model: "claude-haiku-4-5",
-      max_tokens: 300,
-      system: `Tu aides quelqu'un à gérer une situation émotionnellement intense avec une ancienne relation.
-Tu dois générer une réponse authentique qui ressemble EXACTEMENT à sa façon naturelle d'écrire, ET décider du bon moment pour répondre selon la tension de la conversation.
-Tu réponds TOUJOURS en JSON valide, sans aucun texte autour.`,
+      max_tokens: 200,
+      system: `Tu es un assistant qui aide ${relation.participantMe || "quelqu'un"} à répondre à ${relation.participantOther} de façon authentique.
+RÈGLE ABSOLUE : ta réponse doit être un JSON valide, rien d'autre. Pas de markdown, pas d'explication.`,
       messages: [{
         role: "user",
-        content: `Voici comment ${relation.participantMe || "moi"} écrit normalement dans cette conversation :
-${styleExamples || "(pas encore de messages envoyés)"}
+        content: `STYLE D'ÉCRITURE de ${relation.participantMe || "moi"} — imite exactement (abréviations, longueur, ponctuation, majuscules) :
+${styleExamples || "(pas d'exemples disponibles)"}
 
-CONVERSATION RÉCENTE (${burstCount > 1 ? `⚠️ ${burstCount} messages en rafale sans réponse` : "situation normale"}) :
+CONVERSATION (les 20 derniers échanges) :
 ${contextStr}
 
-Ta mission :
-1. Écris UN message court qui répond à la situation — calme, posé, sûr de soi. Imite EXACTEMENT le style d'écriture ci-dessus (abréviations, majuscules, ponctuations, longueur typique, etc.).
-2. Décide du délai optimal en minutes selon la tension :
-   - Conversation calme → 0 à 5 min (réponse quasi-immédiate, naturelle)
-   - Légère tension → 20 à 90 min (occupé, pas urgent)
-   - Forte tension ou rafale → 120 à 480 min (2h-8h, pour laisser retomber la pression)
-   - Crise / messages agressifs → 600 à 1440 min (10h-24h, lendemain)
+CE QUE ${relation.participantOther?.toUpperCase() || "L'AUTRE"} VIENT DE DIRE (réponds à ÇA précisément) :
+${lastTheirMsgs}
 
-Réponds UNIQUEMENT avec ce JSON :
-{"message":"le texte du message","delay_minutes":30}`,
+${isBurst ? `⚠️ RAFALE DE ${burstCount} MESSAGES — réponds avec UN message ultra-court (5 mots max) dans 2 minutes exactement.` : `Décide du délai selon la tension :
+- Neutre/bonne ambiance → 0–5 min
+- Légère tension → 20–90 min
+- Forte tension ou rafale → 120–480 min
+- Crise / agressivité → 600–1440 min`}
+
+JSON attendu UNIQUEMENT :
+{"message":"<réponds précisément à ce qu'il/elle a dit, dans le style ci-dessus>","delay_minutes":${isBurst ? 2 : "<nombre>"}}`,
       }],
     });
 
@@ -507,11 +517,10 @@ Réponds UNIQUEMENT avec ce JSON :
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       const parsed = JSON.parse(jsonMatch?.[0] ?? raw);
       replyText = String(parsed.message ?? "").trim();
-      delayMin  = Math.max(0, Math.min(1440, Number(parsed.delay_minutes) || 0));
+      delayMin  = isBurst ? 2 : Math.max(0, Math.min(1440, Number(parsed.delay_minutes) || 5));
     } catch {
-      // Fallback si le JSON est malformé : utilise le texte brut avec délai court
-      replyText = raw.replace(/^\{.*?\}$/s, "").trim() || raw;
-      delayMin  = 30;
+      replyText = raw.replace(/\{[\s\S]*\}/g, "").trim() || raw.slice(0, 200);
+      delayMin  = isBurst ? 2 : 30;
     }
 
     if (!replyText) return;
@@ -524,6 +533,7 @@ Réponds UNIQUEMENT avec ce JSON :
       content: replyText,
       scheduledAt,
       status: "pending",
+      sourceType: "sos",
     });
 
     console.log(`[SOS] Relation ${relationId} — réponse programmée dans ${delayMin} min : "${replyText.slice(0, 60)}"`);

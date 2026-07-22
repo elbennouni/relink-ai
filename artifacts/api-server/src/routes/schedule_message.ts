@@ -80,7 +80,7 @@ router.delete("/relations/:id/messages/scheduled/:msgId", async (req, res) => {
 });
 
 // GET /api/relations/:id/messages/sos-pending
-// Returns the oldest pending-approval SOS message waiting for confirmation.
+// Returns the current pending SOS message (auto-generated, not yet sent).
 router.get("/relations/:id/messages/sos-pending", async (req, res) => {
   const auth = getAuth(req);
   const userId = auth?.userId;
@@ -93,11 +93,12 @@ router.get("/relations/:id/messages/sos-pending", async (req, res) => {
     and(
       eq(scheduledMessagesTable.userId, userId),
       eq(scheduledMessagesTable.relationId, relationId),
-      eq(scheduledMessagesTable.status, "pending-approval"),
+      eq(scheduledMessagesTable.status, "pending"),
+      eq(scheduledMessagesTable.sourceType, "sos"),
     )
   ).orderBy(desc(scheduledMessagesTable.createdAt)).limit(1);
 
-  res.json({ pendingApproval: msgs[0] ?? null });
+  res.json({ pending: msgs[0] ?? null });
 });
 
 // POST /api/relations/:id/messages/scheduled/:msgId/approve
@@ -122,7 +123,7 @@ router.post("/relations/:id/messages/scheduled/:msgId/approve", async (req, res)
 });
 
 // POST /api/relations/:id/messages/scheduled/:msgId/cancel-sos
-// User dismisses: cancel a pending-approval SOS message
+// User cancels a pending SOS auto-reply before it's sent.
 router.post("/relations/:id/messages/scheduled/:msgId/cancel-sos", async (req, res) => {
   const auth = getAuth(req);
   const userId = auth?.userId;
@@ -135,26 +136,13 @@ router.post("/relations/:id/messages/scheduled/:msgId/cancel-sos", async (req, r
     and(
       eq(scheduledMessagesTable.id, msgId),
       eq(scheduledMessagesTable.userId, userId),
-      eq(scheduledMessagesTable.status, "pending-approval"),
+      eq(scheduledMessagesTable.sourceType, "sos"),
+      eq(scheduledMessagesTable.status, "pending"),
     )
   );
 
   res.json({ ok: true });
 });
-
-// Helper exported for other routes: cancel all pending-approval SOS messages
-// for a relation when the user decides to reply manually.
-export async function cancelSosPendingApproval(relationId: number, userId: string) {
-  await db.update(scheduledMessagesTable)
-    .set({ status: "cancelled" })
-    .where(
-      and(
-        eq(scheduledMessagesTable.userId, userId),
-        eq(scheduledMessagesTable.relationId, relationId),
-        eq(scheduledMessagesTable.status, "pending-approval"),
-      )
-    );
-}
 
 // ─── Background sender job ────────────────────────────────────────────────────
 export function startScheduledMessageJob() {
