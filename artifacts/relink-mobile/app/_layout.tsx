@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -26,20 +26,13 @@ const domain =
 const BASE = `https://${domain}`;
 setBaseUrl(BASE);
 
-// Dev fallback key (pk_test_). At runtime we fetch the real key from /api/config
-// so the correct live key (pk_live_) is used in production.
-const FALLBACK_KEY = 'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ';
+// The build script (scripts/build.js) bakes EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=$CLERK_PUBLISHABLE_KEY
+// into the bundle at build time. Replit auto-swaps CLERK_PUBLISHABLE_KEY to pk_live_ on publish,
+// so the production bundle always has the live Clerk key — no runtime fetch needed.
+const publishableKey =
+  process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+  'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ';
 const proxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined;
-
-// Kick off the fetch at module load time so it's ready as soon as possible.
-// ClerkProvider will NOT render until this promise resolves, avoiding a
-// race condition where Clerk inits with pk_test_ and then gets the wrong key.
-const clerkKeyPromise: Promise<string> = fetch(`${BASE}/api/config`)
-  .then(r => r.json())
-  .then((cfg: { clerkPublishableKey?: string }) =>
-    cfg.clerkPublishableKey?.startsWith('pk_') ? cfg.clerkPublishableKey : FALLBACK_KEY
-  )
-  .catch(() => FALLBACK_KEY);
 
 SplashScreen.preventAutoHideAsync();
 
@@ -151,22 +144,13 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
-  // Wait for the Clerk publishable key from /api/config before rendering.
-  // ClerkProvider must NOT mount until we have the definitive key — if it
-  // starts with pk_test_ and the server uses sk_live_, every request is 401.
-  const [publishableKey, setPublishableKey] = useState<string | null>(null);
-  useEffect(() => {
-    clerkKeyPromise.then(setPublishableKey);
-  }, []);
-
   useEffect(() => {
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
 
-  // Block render until both fonts AND the Clerk key are ready.
-  if ((!fontsLoaded && !fontError) || !publishableKey) return null;
+  if (!fontsLoaded && !fontError) return null;
 
   return (
     <ClerkProvider
