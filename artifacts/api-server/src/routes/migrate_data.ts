@@ -6,6 +6,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { getAuth } from "@clerk/express";
 
 const router = Router();
 const SECRET = "relink-migrate-2026-secret";
@@ -197,6 +198,51 @@ router.post("/admin/migrate-data", async (req, res) => {
   } catch (err: any) {
     console.error("[migrate-data] error:", err);
     return res.status(500).json({ error: String(err.message ?? err) });
+  }
+});
+
+/**
+ * GET /admin/whoami — retourne le userId Clerk vu par ce serveur.
+ * Utilisé pour diagnostiquer ce que le serveur prod voit comme userId.
+ */
+router.get("/admin/whoami", (req, res) => {
+  if (req.headers["x-migrate-secret"] !== SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const auth = getAuth(req);
+  return res.json({ userId: auth?.userId ?? null, sessionId: auth?.sessionId ?? null });
+});
+
+/**
+ * POST /admin/auto-fix-user — lit le userId Clerk depuis le token dans le header,
+ * et réassigne toutes les relations de "fromUserId" vers ce userId réel.
+ * Utile quand le userId en prod est différent de celui en dev.
+ */
+router.post("/admin/auto-fix-user", async (req, res) => {
+  if (req.headers["x-migrate-secret"] !== SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const auth = getAuth(req);
+  const realUserId = auth?.userId;
+  const { fromUserId } = req.body as { fromUserId: string };
+
+  if (!realUserId) {
+    return res.status(401).json({ error: "No Clerk userId found — include a valid Bearer token" });
+  }
+  if (!fromUserId) {
+    return res.status(400).json({ error: "Missing fromUserId" });
+  }
+  if (realUserId === fromUserId) {
+    return res.json({ ok: true, message: "Same userId — no change needed", userId: realUserId });
+  }
+
+  try {
+    const r = await db.execute(sql`
+      UPDATE relations SET user_id = ${realUserId} WHERE user_id = ${fromUserId}
+    `);
+    return res.json({ ok: true, fromUserId, toUserId: realUserId, updated: r.rowCount });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
   }
 });
 
