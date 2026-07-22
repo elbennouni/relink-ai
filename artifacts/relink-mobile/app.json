@@ -22,6 +22,14 @@
         ]
       }
     },
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "url": "https://ai-agent-tool-mikam514.replit.app/relink-mobile"
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
     "android": {
       "package": "com.relinkapp.mobile"
     },
@@ -30,7 +38,8 @@
     },
     "plugins": [
       [
-        "expo-router",
+        "expo-updates",
+      "expo-router",
         {
           "origin": "https://replit.com/"
         }
