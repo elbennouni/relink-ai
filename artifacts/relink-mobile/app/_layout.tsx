@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -23,12 +23,12 @@ import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 const domain =
   process.env.EXPO_PUBLIC_DOMAIN ||
   'ai-agent-tool-mikam514.replit.app';
-setBaseUrl(`https://${domain}`);
+const BASE = `https://${domain}`;
+setBaseUrl(BASE);
 
-// Fallback Clerk key so the app never freezes on startup with a missing key
-const publishableKey =
-  process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
-  'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ';
+// Dev fallback key (pk_test_). At runtime we fetch the real key from /api/config
+// so the correct live key is used in production without needing a separate secret.
+const FALLBACK_KEY = 'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ';
 const proxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined;
 
 SplashScreen.preventAutoHideAsync();
@@ -140,6 +140,21 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
   });
+
+  // Fetch the correct Clerk publishable key from the API server.
+  // This ensures the live key (pk_live_) is used in production without
+  // needing a separate EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY secret.
+  const [publishableKey, setPublishableKey] = useState(FALLBACK_KEY);
+  useEffect(() => {
+    fetch(`${BASE}/api/config`)
+      .then(r => r.json())
+      .then((cfg: { clerkPublishableKey?: string }) => {
+        if (cfg.clerkPublishableKey && cfg.clerkPublishableKey.startsWith('pk_')) {
+          setPublishableKey(cfg.clerkPublishableKey);
+        }
+      })
+      .catch(() => { /* keep fallback */ });
+  }, []);
 
   useEffect(() => {
     if (fontsLoaded || fontError) {

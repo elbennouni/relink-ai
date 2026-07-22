@@ -1,4 +1,5 @@
 - [ReLink AI stack](relink-stack.md) — Anthropic SSE routes must use fetch+ReadableStream, not orval hooks; api-zod is empty (export {}), use manual zod schemas in routes
+- [Clerk live vs test user IDs](clerk-live-userid.md) — Replit auto-swaps keys at publish; same email gets different userId in dev vs prod; mobile app must fetch pk from /api/config
 - [API server build quirks](api-server-build.md) — zod must be in api-server dependencies explicitly; health.ts must not import from api-zod; useToast lives in @/hooks/use-toast not @/components/ui/toast
 - [WhatsApp media handling](whatsapp-media.md) — images/audio stored as base64 in media_data column; isImage/isAudio must check data URL prefix, not just !!mediaData; multer needed for /api/transcribe
 - [WhatsApp LID JID routing](whatsapp-lid-routing.md) — @lid JIDs are real messages; learn LID↔phone from contacts.upsert + outgoing messages; never filter @lid

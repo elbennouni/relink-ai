@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import configRouter from "./config";
 import relationsRouter from "./relations";
 import whatsappRouter from "./whatsapp";
 import memoryRouter from "./memory";
@@ -27,6 +28,7 @@ const router: IRouter = Router();
 
 // ── Public routes (no Clerk session required) ─────────────────────────────────
 router.use(healthRouter);
+router.use(configRouter);
 router.use(downloadApkRouter);
 router.use(migrateDataRouter); // TEMP: migration endpoint, remove after use
 // Only the Meta webhook challenge + inbound message endpoints are public.
