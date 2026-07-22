@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -33,32 +33,54 @@ const proxyUrl = `${BASE}/api/__clerk`;
 
 SplashScreen.preventAutoHideAsync();
 
+// ---------------------------------------------------------------------------
+// Stable module-level token getter — eliminates the React useEffect timing gap.
+//
+// Problem: if setAuthTokenGetter is called inside useEffect, there is a brief
+// window (between first render and effects running) where the getter is null,
+// causing the first API calls to go out without a token and get 401.
+//
+// Solution: register ONE stable function at module load time that always reads
+// from a ref. ClerkAuthSync updates the ref synchronously during render, so by
+// the time any child component fires a fetch, the ref already points to the
+// correct getToken function.
+// ---------------------------------------------------------------------------
+let _currentGetToken: (() => Promise<string | null>) | null = null;
+
+setAuthTokenGetter(async () => {
+  if (!_currentGetToken) return null;
+  try {
+    return await _currentGetToken();
+  } catch {
+    return null;
+  }
+});
+
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { staleTime: 30_000, retry: 1 },
+    queries: { staleTime: 30_000, retry: 2 },
   },
 });
 
 /**
- * Registers the Clerk bearer token getter globally so every API call
- * includes the Authorization header. Also clears the QueryClient cache
- * whenever the signed-in state changes — preventing one user from seeing
- * another user's cached data after sign-out / sign-in on the same device.
- *
+ * Keeps the module-level _currentGetToken in sync with Clerk's auth state.
+ * Updates synchronously during render (not in an effect) so there is no gap.
  * Must live inside <ClerkLoaded> so useAuth() is available.
  */
 function ClerkAuthSync() {
   const { isSignedIn, getToken } = useAuth();
   const prevSignedInRef = useRef<boolean | null>(null);
 
-  // Register (or clear) the bearer token getter whenever auth state changes.
-  // Returns null when signed out so no Authorization header is sent.
+  // Update the ref synchronously during render — no timing gap.
+  _currentGetToken = isSignedIn ? getToken : null;
+
+  // Mirror in an effect for safety / cleanup.
   useEffect(() => {
-    setAuthTokenGetter(isSignedIn ? () => getToken() : null);
+    _currentGetToken = isSignedIn ? getToken : null;
   }, [getToken, isSignedIn]);
 
   // Clear ALL cached query data when the sign-in state flips.
-  // This prevents user A's relations/messages from leaking to user B.
+  // Prevents user A's data from leaking to user B on the same device.
   useEffect(() => {
     if (prevSignedInRef.current !== null && prevSignedInRef.current !== isSignedIn) {
       queryClient.clear();
@@ -153,7 +175,6 @@ export default function RootLayout() {
         if (key) {
           setPublishableKey(key);
         } else {
-          // Server responded but key missing — use baked-in fallback
           setPublishableKey(
             process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
             'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ'
@@ -161,7 +182,6 @@ export default function RootLayout() {
         }
       })
       .catch(() => {
-        // Network error — fall back to whatever was baked in at build time
         setPublishableKey(
           process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
           'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ'
@@ -179,14 +199,21 @@ export default function RootLayout() {
   // Render nothing until both are ready — splash screen covers the blank state
   if ((!fontsLoaded && !fontError) || !publishableKey) return null;
 
+  // On web (Expo Web in browser), don't use AsyncStorage-backed tokenCache.
+  // Using it can restore a stale session from a previous Clerk instance (e.g.
+  // a pk_test_ session left over from dev), which the production API server
+  // (using sk_live_) rejects with 401. On web, Clerk manages sessions via
+  // cookies automatically — no cache needed.
+  const cache = Platform.OS === 'web' ? undefined : tokenCache;
+
   return (
     <ClerkProvider
       publishableKey={publishableKey}
-      tokenCache={tokenCache}
+      tokenCache={cache}
       proxyUrl={proxyUrl}
     >
       <ClerkLoaded>
-        {/* Registers bearer token getter and clears cache on auth changes — must be inside ClerkLoaded */}
+        {/* Keeps _currentGetToken in sync — must be inside ClerkLoaded */}
         <ClerkAuthSync />
         <SafeAreaProvider>
           <ErrorBoundary>
