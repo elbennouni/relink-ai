@@ -10,6 +10,41 @@ import { sql } from "drizzle-orm";
 const router = Router();
 const SECRET = "relink-migrate-2026-secret";
 
+// Copy messages from one relation to another (internal DB copy — no data transfer needed)
+router.post("/admin/copy-rel-messages", async (req, res) => {
+  if (req.headers["x-migrate-secret"] !== SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const { fromRelId, toRelId } = req.body as { fromRelId: number; toRelId: number };
+  if (!fromRelId || !toRelId) return res.status(400).json({ error: "Missing fromRelId or toRelId" });
+  try {
+    const r = await db.execute(sql`
+      INSERT INTO whatsapp_messages (relation_id, sender, content, is_me, sent_at, import_source, content_hash, media_data)
+      SELECT ${toRelId}, sender, content, is_me, sent_at, import_source, content_hash, media_data
+      FROM whatsapp_messages WHERE relation_id = ${fromRelId}
+      ON CONFLICT DO NOTHING
+    `);
+    return res.json({ ok: true, copied: r.rowCount });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// Delete relations by IDs (for cleaning up duplicates)
+router.post("/admin/delete-relations", async (req, res) => {
+  if (req.headers["x-migrate-secret"] !== SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const { ids } = req.body as { ids: number[] };
+  if (!ids || !ids.length) return res.status(400).json({ error: "Missing ids" });
+  try {
+    const r = await db.execute(sql`DELETE FROM relations WHERE id = ANY(${ids})`);
+    return res.json({ ok: true, deleted: r.rowCount });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // Fix user_id in production DB
 router.post("/admin/fix-user-id", async (req, res) => {
   if (req.headers["x-migrate-secret"] !== SECRET) {
