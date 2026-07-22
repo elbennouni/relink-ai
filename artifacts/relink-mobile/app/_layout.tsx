@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -19,20 +19,17 @@ import { ClerkProvider, ClerkLoaded, useAuth } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
 import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
 
-// Set API base URL — use production domain by default so the APK always works
+// Production domain is the fallback so the app always works even without env vars.
+// EXPO_PUBLIC_DOMAIN is baked in by the build script at build time.
 const domain =
   process.env.EXPO_PUBLIC_DOMAIN ||
   'ai-agent-tool-mikam514.replit.app';
 const BASE = `https://${domain}`;
 setBaseUrl(BASE);
 
-// The build script (scripts/build.js) bakes EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=$CLERK_PUBLISHABLE_KEY
-// into the bundle at build time. Replit auto-swaps CLERK_PUBLISHABLE_KEY to pk_live_ on publish,
-// so the production bundle always has the live Clerk key — no runtime fetch needed.
-const publishableKey =
-  process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
-  'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ';
-const proxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined;
+// Clerk proxy URL — always computed from the actual domain so it's correct
+// in both dev and prod regardless of what was baked into the bundle.
+const proxyUrl = `${BASE}/api/__clerk`;
 
 SplashScreen.preventAutoHideAsync();
 
@@ -137,6 +134,7 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  const [publishableKey, setPublishableKey] = useState<string | null>(null);
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -144,13 +142,42 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
+  // Fetch the Clerk publishable key from the API server at runtime.
+  // This makes the same bundle work in both dev (pk_test_) and prod (pk_live_)
+  // without needing to rebuild — the server returns the correct key for its env.
   useEffect(() => {
-    if (fontsLoaded || fontError) {
+    fetch(`${BASE}/api/config`)
+      .then((r) => r.json())
+      .then((data) => {
+        const key = data?.clerkPublishableKey;
+        if (key) {
+          setPublishableKey(key);
+        } else {
+          // Server responded but key missing — use baked-in fallback
+          setPublishableKey(
+            process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+            'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ'
+          );
+        }
+      })
+      .catch(() => {
+        // Network error — fall back to whatever was baked in at build time
+        setPublishableKey(
+          process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+          'pk_test_cmVsZXZhbnQtamVubmV0LTU4LmNsZXJrLmFjY291bnRzLmRldiQ'
+        );
+      });
+  }, []);
+
+  // Keep splash screen up until both fonts AND the Clerk key are ready
+  useEffect(() => {
+    if ((fontsLoaded || fontError) && publishableKey) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError]);
+  }, [fontsLoaded, fontError, publishableKey]);
 
-  if (!fontsLoaded && !fontError) return null;
+  // Render nothing until both are ready — splash screen covers the blank state
+  if ((!fontsLoaded && !fontError) || !publishableKey) return null;
 
   return (
     <ClerkProvider
