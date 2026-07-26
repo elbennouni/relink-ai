@@ -348,17 +348,28 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
       if (session.intentionalClose) return;
 
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      session.status = "disconnected";
-      broadcastToSession(relationId, { type: "disconnected", loggedOut: !shouldReconnect });
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-      if (shouldReconnect) {
-        setTimeout(() => startSession(relationId), 3000);
-      } else {
-        // Logged out — delete session files
+      // Only auto-reconnect when the session was fully connected (QR scanned).
+      // If Baileys drops while still in "connecting" or "qr" state (before the
+      // user scans), do NOT reconnect automatically — repeated connection attempts
+      // cause WhatsApp to rate-limit and the QR rotation makes scanning impossible.
+      const wasConnected = session.status === "connected";
+
+      console.log(`[Baileys:${relationId}] connection closed — statusCode=${statusCode} wasConnected=${wasConnected} isLoggedOut=${isLoggedOut}`);
+
+      session.status = "disconnected";
+      broadcastToSession(relationId, { type: "disconnected", loggedOut: isLoggedOut });
+
+      if (isLoggedOut) {
+        // WhatsApp explicitly logged this device out — wipe session files
         sessions.delete(relationId);
         fs.rmSync(dir, { recursive: true, force: true });
+      } else if (wasConnected) {
+        // Was connected (QR scanned), dropped for a transient reason → reconnect
+        setTimeout(() => startSession(relationId), 3000);
       }
+      // else: dropped before QR scan — don't reconnect; let the user retry
     }
   });
 
@@ -766,19 +777,19 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
 
   // Start / restart logic:
   // - No session at all → start one
-  // - Session is "connected" and user wants history → restart (wipes creds for fresh link)
+  // - Session is "disconnected" → restart (user retried after a drop)
+  // - Session is "connected" and user wants history (and not yet imported) → restart with creds wipe
   // - Session is already "connecting" or "qr" → just subscribe, don't restart
-  //   (handles browser SSE auto-reconnect: the browser re-opens SSE after the 5-min proxy
-  //   timeout; restarting again would wipe creds mid-connection and loop forever)
+  //   (handles browser SSE auto-reconnect after 5-min proxy timeout)
   const sessionBusy = session?.status === "connecting" || session?.status === "qr";
 
-  if (!session) {
+  if (!session || session.status === "disconnected") {
     await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
   } else if (wantsHistoryImport && session.status === "connected" && !session.historyImported) {
-    // Connected, user wants history, and it hasn't been imported yet → restart with creds wipe.
-    // If historyImported=true the SSE browser auto-reconnect (after 5-min proxy timeout) arrives
-    // here; we must NOT restart in that case or we'd wipe creds and loop forever.
+    // Connected, user wants history, not yet imported → restart with creds wipe.
+    // Guard on historyImported so that browser SSE auto-reconnect (5-min proxy timeout)
+    // with historyDays still in the URL does NOT re-wipe creds.
     await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
   } else if (!sessionBusy && contactPhone) {
