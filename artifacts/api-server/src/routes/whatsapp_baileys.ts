@@ -749,13 +749,22 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
     return;
   }
 
-  // Start fresh, restart for history import, or join existing session
-  if (!session || wantsHistoryImport) {
-    // wantsHistoryImport restarts even an active session so Baileys can
-    // re-sync with syncFullHistory=true using the saved credentials.
+  // Start / restart logic:
+  // - No session at all → start one
+  // - Session is "connected" and user wants history → restart (wipes creds for fresh link)
+  // - Session is already "connecting" or "qr" → just subscribe, don't restart
+  //   (handles browser SSE auto-reconnect: the browser re-opens SSE after the 5-min proxy
+  //   timeout; restarting again would wipe creds mid-connection and loop forever)
+  const sessionBusy = session?.status === "connecting" || session?.status === "qr";
+
+  if (!session) {
     await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
-  } else if (contactPhone) {
+  } else if (wantsHistoryImport && session.status === "connected") {
+    // Connected but user explicitly wants a history re-import → restart with creds wipe
+    await startSession(relationId, contactPhone, historyDays);
+    session = sessions.get(relationId)!;
+  } else if (!sessionBusy && contactPhone) {
     session.contactPhone = contactPhone;
     writeConfig(relationId, { contactPhone });
     if (historyDays !== undefined) session.historyDays = historyDays;
