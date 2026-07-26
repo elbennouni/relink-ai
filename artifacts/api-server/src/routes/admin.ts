@@ -114,7 +114,11 @@ router.delete("/admin/users/:userId", requireAdmin, async (req, res) => {
 // One-time endpoint: registers the native app redirect URL in the Clerk
 // instance that the current server uses (test in dev, live in prod).
 // Uses the server-side CLERK_SECRET_KEY so it works with the live key in prod.
-router.post("/admin/setup-native-redirect", requireAdmin, async (_req, res) => {
+router.post("/admin/setup-native-redirect", async (req, res) => {
+  // Simple one-time token guard — no Clerk session needed
+  if (req.headers["x-setup-token"] !== process.env.SESSION_SECRET) {
+    res.status(403).json({ error: "forbidden" }); return;
+  }
   const urls = [
     "relink-mobile://oauth-native-callback",
     "relink-mobile:///oauth-native-callback",
