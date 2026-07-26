@@ -15,6 +15,15 @@ import { fetch } from 'expo/fetch';
 const domain = process.env.EXPO_PUBLIC_DOMAIN ?? '';
 
 type Status = 'none' | 'connecting' | 'qr' | 'connected' | 'disconnected';
+type HistoryPeriod = '0' | '7' | '60' | '180' | '3650';
+
+const HISTORY_OPTIONS: { value: HistoryPeriod; label: string; sub: string }[] = [
+  { value: '0',    label: 'Aucun',    sub: 'Temps réel' },
+  { value: '7',    label: '1 sem.',   sub: '7 jours' },
+  { value: '60',   label: '2 mois',   sub: '60 jours' },
+  { value: '180',  label: '6 mois',   sub: '180 jours' },
+  { value: '3650', label: 'Tout',     sub: 'Complet' },
+];
 
 export default function WhatsAppScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -31,6 +40,9 @@ export default function WhatsAppScreen() {
   const [qrData, setQrData] = useState<string | null>(null);
   const [phone, setPhone] = useState('');
   const [disconnecting, setDisconnecting] = useState(false);
+  const [historyPeriod, setHistoryPeriod] = useState<HistoryPeriod>('60');
+  const [historyImporting, setHistoryImporting] = useState<{ total: number } | null>(null);
+  const [historyDone, setHistoryDone] = useState<{ imported: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Check initial status
@@ -48,21 +60,29 @@ export default function WhatsAppScreen() {
     return () => { abortRef.current?.abort(); };
   }, []);
 
-  const startSSE = useCallback(async (contactPhone?: string) => {
+  const startSSE = useCallback(async (contactPhone?: string, historyDays?: string) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
     setStatus('connecting');
     setQrData(null);
+    setHistoryImporting(null);
+    setHistoryDone(null);
 
     try {
       const token = await getToken();
-      const params = contactPhone ? `?contactPhone=${encodeURIComponent(contactPhone)}` : '';
-      const res = await fetch(`https://${domain}/api/relations/${relationId}/whatsapp/qr${params}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        signal: controller.signal,
-      } as any);
+      const params = new URLSearchParams();
+      if (contactPhone) params.set('contactPhone', contactPhone);
+      if (historyDays !== undefined) params.set('historyDays', historyDays);
+      const qs = params.toString();
+      const res = await fetch(
+        `https://${domain}/api/relations/${relationId}/whatsapp/qr${qs ? `?${qs}` : ''}`,
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: controller.signal,
+        } as any
+      );
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const reader = (res.body as ReadableStream<Uint8Array>).getReader();
@@ -86,6 +106,11 @@ export default function WhatsAppScreen() {
               } else if (data.type === 'connected') {
                 setStatus('connected');
                 setQrData(null);
+              } else if (data.type === 'history-importing') {
+                setHistoryImporting({ total: data.total });
+              } else if (data.type === 'history-done') {
+                setHistoryImporting(null);
+                setHistoryDone({ imported: data.imported });
                 reader.cancel();
                 return;
               } else if (data.type === 'disconnected') {
@@ -105,7 +130,7 @@ export default function WhatsAppScreen() {
 
   const handleConnect = () => {
     const cleaned = phone.replace(/\D/g, '');
-    startSSE(cleaned || undefined);
+    startSSE(cleaned || undefined, historyPeriod);
   };
 
   const handleDisconnect = () => {
@@ -127,6 +152,7 @@ export default function WhatsAppScreen() {
               });
               setStatus('none');
               setQrData(null);
+              setHistoryDone(null);
             } catch {}
             finally { setDisconnecting(false); }
           },
@@ -174,10 +200,10 @@ export default function WhatsAppScreen() {
             <Feather name="info" size={13} /> Comment ça marche
           </Text>
           <Text style={[styles.infoText, { color: colors.mutedForeground }]}>
-            1. Saisis le numéro de {contactName} (optionnel — pour filtrer vos échanges){'\n'}
-            2. Génère le QR code{'\n'}
-            3. Ouvre WhatsApp → Appareils connectés → Connecter un appareil{'\n'}
-            4. Scanne le QR — les messages arrivent en temps réel !
+            1. Saisis le numéro de {contactName} (optionnel){'\n'}
+            2. Choisis l'historique à importer{'\n'}
+            3. Génère le QR code{'\n'}
+            4. WhatsApp → Appareils connectés → Connecter → Scanne !
           </Text>
         </View>
 
@@ -202,6 +228,41 @@ export default function WhatsAppScreen() {
             <Text style={[styles.hint, { color: colors.mutedForeground }]}>
               Laisse vide pour capturer tous les contacts
             </Text>
+
+            {/* History period */}
+            <Text style={[styles.label, { color: colors.mutedForeground, marginTop: 4 }]}>
+              Historique à importer
+            </Text>
+            <View style={styles.historyRow}>
+              {HISTORY_OPTIONS.map((opt) => {
+                const selected = historyPeriod === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[
+                      styles.historyChip,
+                      {
+                        backgroundColor: selected ? colors.primary : colors.background,
+                        borderColor: selected ? colors.primary : colors.border,
+                        flex: 1,
+                      },
+                    ]}
+                    onPress={() => setHistoryPeriod(opt.value)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[
+                      styles.historyChipLabel,
+                      { color: selected ? colors.primaryForeground : colors.foreground },
+                    ]}>{opt.label}</Text>
+                    <Text style={[
+                      styles.historyChipSub,
+                      { color: selected ? colors.primaryForeground : colors.mutedForeground, opacity: selected ? 0.85 : 0.65 },
+                    ]}>{opt.sub}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
             <TouchableOpacity
               style={[styles.btn, { backgroundColor: colors.primary }]}
               onPress={handleConnect}
@@ -253,6 +314,24 @@ export default function WhatsAppScreen() {
 
         {status === 'connected' && (
           <View style={styles.connectedSection}>
+            {/* History importing */}
+            {historyImporting && (
+              <View style={[styles.historyImportBanner, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}>
+                <ActivityIndicator size="small" color="#2563EB" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.historyImportTitle}>Import de l'historique…</Text>
+                  <Text style={styles.historyImportSub}>{historyImporting.total} messages à traiter</Text>
+                </View>
+              </View>
+            )}
+            {/* History done */}
+            {historyDone && historyDone.imported > 0 && (
+              <View style={[styles.historyDoneBanner, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}>
+                <Feather name="check-circle" size={15} color="#059669" />
+                <Text style={styles.historyDoneText}>{historyDone.imported} messages importés</Text>
+              </View>
+            )}
+
             <View style={[styles.connectedBadge, { backgroundColor: '#D1FAE5', borderColor: '#A7F3D0' }]}>
               <Feather name="check-circle" size={20} color="#065F46" />
               <View style={{ flex: 1 }}>
@@ -319,13 +398,23 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
   },
   warnText: { fontSize: 13, fontFamily: 'Inter_400Regular' },
-  label: { fontSize: 12, fontFamily: 'Inter_600SemiBold', textTransform: 'uppercase', letterSpacing: 0.5 },
+  label: { fontSize: 11, fontFamily: 'Inter_600SemiBold', textTransform: 'uppercase', letterSpacing: 0.5 },
   input: {
     borderWidth: 1, borderRadius: 12,
     paddingHorizontal: 14, paddingVertical: 11,
     fontSize: 15,
   },
   hint: { fontSize: 11, fontFamily: 'Inter_400Regular' },
+  historyRow: {
+    flexDirection: 'row', gap: 6,
+  },
+  historyChip: {
+    borderWidth: 1, borderRadius: 10,
+    paddingVertical: 8, paddingHorizontal: 4,
+    alignItems: 'center', gap: 2,
+  },
+  historyChipLabel: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
+  historyChipSub: { fontSize: 9, fontFamily: 'Inter_400Regular' },
   btn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 8, paddingVertical: 13, borderRadius: 12,
@@ -341,6 +430,17 @@ const styles = StyleSheet.create({
   },
   btnOutlineText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   connectedSection: { gap: 12 },
+  historyImportBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12,
+  },
+  historyImportTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: '#1D4ED8' },
+  historyImportSub: { fontSize: 11, fontFamily: 'Inter_400Regular', color: '#3B82F6', marginTop: 2 },
+  historyDoneBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9,
+  },
+  historyDoneText: { fontSize: 12, fontFamily: 'Inter_500Medium', color: '#059669' },
   connectedBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     borderWidth: 1, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14,

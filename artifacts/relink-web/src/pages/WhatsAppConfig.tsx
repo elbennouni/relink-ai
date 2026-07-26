@@ -3,13 +3,23 @@ import { useParams } from "wouter";
 import { useGetRelation } from "@workspace/api-client-react";
 import {
   Smartphone, CheckCircle2, Loader2, Trash2, Copy, ExternalLink,
-  ShieldCheck, Mic, Zap, Info, QrCode, Building2, RefreshCw, Wifi, WifiOff
+  ShieldCheck, Mic, Zap, Info, QrCode, Building2, RefreshCw, Wifi, WifiOff,
+  History, Download
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 type Tab = "qr" | "business";
+type HistoryPeriod = "0" | "7" | "60" | "180" | "3650";
+
+const HISTORY_OPTIONS: { value: HistoryPeriod; label: string; desc: string }[] = [
+  { value: "0",    label: "Aucun",    desc: "Temps réel seulement" },
+  { value: "7",    label: "1 semaine", desc: "7 derniers jours" },
+  { value: "60",   label: "2 mois",    desc: "60 derniers jours" },
+  { value: "180",  label: "6 mois",    desc: "180 derniers jours" },
+  { value: "3650", label: "Tout",      desc: "Historique complet" },
+];
 
 // ─── QR Code Tab ─────────────────────────────────────────────────────────────
 
@@ -20,6 +30,9 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
   const [contactPhone, setContactPhone] = useState("");
   const [savedContact, setSavedContact] = useState<string | undefined>();
   const [disconnecting, setDisconnecting] = useState(false);
+  const [historyPeriod, setHistoryPeriod] = useState<HistoryPeriod>("60");
+  const [historyImporting, setHistoryImporting] = useState<{ total: number } | null>(null);
+  const [historyDone, setHistoryDone] = useState<{ imported: number } | null>(null);
   const sseRef = useRef<EventSource | null>(null);
 
   // Check initial status
@@ -29,19 +42,24 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
       .then((d) => {
         setStatus(d.status ?? "none");
         if (d.contactPhone) setSavedContact(d.contactPhone);
-        // Auto-reconnect if previously connected
         if (d.status === "connected") setStatus("connected");
         if (d.status === "connecting" || d.status === "qr") startSSE();
       })
       .catch(() => {});
   }, [relationId]);
 
-  const startSSE = (phone?: string) => {
+  const startSSE = (phone?: string, days?: string) => {
     sseRef.current?.close();
     setQrData(null);
+    setHistoryImporting(null);
+    setHistoryDone(null);
     setStatus("connecting");
 
-    const url = `/api/relations/${relationId}/whatsapp/qr${phone ? `?contactPhone=${encodeURIComponent(phone)}` : ""}`;
+    const params = new URLSearchParams();
+    if (phone) params.set("contactPhone", phone);
+    if (days !== undefined) params.set("historyDays", days);
+    const qs = params.toString();
+    const url = `/api/relations/${relationId}/whatsapp/qr${qs ? `?${qs}` : ""}`;
     const es = new EventSource(url);
     sseRef.current = es;
 
@@ -54,8 +72,16 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
         } else if (data.type === "connected") {
           setStatus("connected");
           setQrData(null);
-          es.close();
           toast({ title: "WhatsApp connecté ✓", description: "Les messages arrivent en temps réel." });
+        } else if (data.type === "history-importing") {
+          setHistoryImporting({ total: data.total });
+        } else if (data.type === "history-done") {
+          setHistoryImporting(null);
+          setHistoryDone({ imported: data.imported });
+          if (data.imported > 0) {
+            toast({ title: `Historique importé ✓`, description: `${data.imported} messages chargés.` });
+          }
+          es.close();
         } else if (data.type === "disconnected") {
           setStatus(data.loggedOut ? "none" : "disconnected");
           setQrData(null);
@@ -73,7 +99,7 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
   const handleConnect = () => {
     const phone = contactPhone.replace(/\D/g, "");
     if (phone) setSavedContact(phone);
-    startSSE(phone || undefined);
+    startSSE(phone || undefined, historyPeriod);
   };
 
   const handleDisconnect = async () => {
@@ -86,6 +112,7 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
       setQrData(null);
       setSavedContact(undefined);
       setContactPhone("");
+      setHistoryDone(null);
       toast({ title: "Déconnecté" });
     } catch {
       toast({ title: "Erreur", variant: "destructive" });
@@ -102,9 +129,9 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
         <p className="font-semibold flex items-center gap-2"><QrCode className="h-4 w-4 text-primary" /> Comment ça marche</p>
         <ol className="space-y-1 text-muted-foreground text-xs list-decimal list-inside">
           <li>Saisis le numéro de {relationName} (pour filtrer uniquement vos échanges)</li>
+          <li>Choisis combien d'historique importer</li>
           <li>Clique sur "Générer le QR code"</li>
-          <li>Ouvre WhatsApp sur ton téléphone → Appareils connectés → Connecter un appareil</li>
-          <li>Scanne le QR code — la session est active !</li>
+          <li>Ouvre WhatsApp → Appareils connectés → Connecter un appareil et scanne</li>
         </ol>
       </div>
 
@@ -126,6 +153,37 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
             />
             <p className="text-xs text-muted-foreground">Laisse vide pour capturer tous les contacts</p>
           </div>
+
+          {/* History period selector */}
+          <div className="space-y-2">
+            <label className="text-xs font-semibold flex items-center gap-1.5">
+              <History className="h-3.5 w-3.5 text-primary" /> Historique à importer
+            </label>
+            <div className="grid grid-cols-5 gap-1.5">
+              {HISTORY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setHistoryPeriod(opt.value)}
+                  className={cn(
+                    "flex flex-col items-center rounded-xl border px-2 py-2.5 text-center transition-all",
+                    historyPeriod === opt.value
+                      ? "border-primary bg-primary/5 text-primary"
+                      : "border-border bg-background text-muted-foreground hover:border-primary/40"
+                  )}
+                >
+                  <span className="text-xs font-semibold leading-tight">{opt.label}</span>
+                  <span className="text-[10px] leading-tight mt-0.5 opacity-70">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+            {historyPeriod !== "0" && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <Download className="h-3 w-3" />
+                WhatsApp synchronisera les {HISTORY_OPTIONS.find(o => o.value === historyPeriod)?.desc} après la connexion.
+              </p>
+            )}
+          </div>
+
           <Button onClick={handleConnect} className="w-full">
             <QrCode className="h-4 w-4 mr-2" /> Générer le QR code
           </Button>
@@ -158,6 +216,21 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
         </div>
       ) : status === "connected" ? (
         <div className="space-y-3">
+          {historyImporting && (
+            <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
+              <Loader2 className="h-4 w-4 animate-spin text-blue-600 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-blue-800">Import de l'historique en cours…</p>
+                <p className="text-xs text-blue-700">{historyImporting.total} messages à traiter</p>
+              </div>
+            </div>
+          )}
+          {historyDone && historyDone.imported > 0 && (
+            <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-xs text-emerald-700">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              {historyDone.imported} messages importés depuis l'historique
+            </div>
+          )}
           <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-2xl px-4 py-3">
             <div className="relative">
               <Smartphone className="h-5 w-5 text-green-700" />
@@ -180,10 +253,6 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
             >
               {disconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
             </Button>
-          </div>
-          <div className="text-xs text-muted-foreground bg-muted/40 rounded-xl p-3 space-y-1">
-            <p className="font-semibold text-foreground">Historique</p>
-            <p>WhatsApp synchronise automatiquement les messages récents au moment de la connexion. Pour l'historique complet, utilise l'import de fichier .txt depuis l'onglet Conversation.</p>
           </div>
         </div>
       ) : null}

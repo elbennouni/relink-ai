@@ -29,6 +29,7 @@ interface Session {
   status: "connecting" | "qr" | "connected" | "disconnected";
   qr?: string; // base64 QR image
   contactPhone?: string; // e.g. "33612345678" (no +)
+  historyDays?: number; // 0 = no history, 7/60/180/3650 = import window
   sseClients: Set<{ write: (data: string) => void; end: () => void }>;
 }
 
@@ -231,7 +232,7 @@ async function transcribeWhatsappAudio(
 
 // ─── Start / reconnect a Baileys session ─────────────────────────────────────
 
-async function startSession(relationId: number, contactPhone?: string) {
+async function startSession(relationId: number, contactPhone?: string, historyDays?: number) {
   // Close any existing session
   const existing = sessions.get(relationId);
   if (existing) {
@@ -250,10 +251,14 @@ async function startSession(relationId: number, contactPhone?: string) {
   const { state, saveCreds } = await useMultiFileAuthState(dir);
   const { version } = await fetchLatestBaileysVersion();
 
+  // syncFullHistory = true when the user asked for historical import
+  const wantsHistory = historyDays !== undefined && historyDays > 0;
+
   const session: Session = {
     socket: null as unknown as ReturnType<typeof makeWASocket>,
     status: "connecting",
     contactPhone: phone,
+    historyDays,
     sseClients: new Set(),
   };
   sessions.set(relationId, session);
@@ -265,7 +270,7 @@ async function startSession(relationId: number, contactPhone?: string) {
       keys: makeCacheableSignalKeyStore(state.keys, console as unknown as Parameters<typeof makeCacheableSignalKeyStore>[1]),
     },
     printQRInTerminal: false,
-    syncFullHistory: false,
+    syncFullHistory: wantsHistory,
     // Returning a non-undefined value is critical — Baileys drops incoming
     // messages silently when getMessage returns undefined (needed for retries).
     getMessage: async (_key) => ({ conversation: "" }),
@@ -653,8 +658,32 @@ JSON attendu UNIQUEMENT :
   // ── Historical messages (WhatsApp delivers past conversations on connect) ──
   sock.ev.on("messages.history-set", async ({ messages, isLatest }) => {
     console.log(`[Baileys] history-set: ${messages.length} messages (isLatest=${isLatest}) for relation ${relationId}`);
+
+    // Filter by requested history window
+    const days = session.historyDays;
+    let filtered = messages as WAMessage[];
+    if (days !== undefined && days > 0) {
+      const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+      filtered = filtered.filter((m) => {
+        const ts = Number(m.messageTimestamp) * 1000;
+        return ts >= cutoff;
+      });
+      console.log(`[Baileys] history-set: kept ${filtered.length}/${messages.length} within last ${days} days`);
+    } else if (days === 0) {
+      // User explicitly requested no history import
+      console.log(`[Baileys] history-set: skipping (historyDays=0)`);
+      return;
+    }
+
+    if (filtered.length === 0) {
+      broadcastToSession(relationId, { type: "history-done", imported: 0 });
+      return;
+    }
+
+    broadcastToSession(relationId, { type: "history-importing", total: filtered.length });
     // Skip audio transcription for history (too slow for bulk); store as [Message vocal]
-    await storeMessages(messages as WAMessage[], true);
+    await storeMessages(filtered, true);
+    broadcastToSession(relationId, { type: "history-done", imported: filtered.length });
   });
 }
 
@@ -679,10 +708,11 @@ JSON attendu UNIQUEMENT :
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
-/** GET /api/relations/:id/whatsapp/qr  — SSE stream: qr | connected | disconnected */
+/** GET /api/relations/:id/whatsapp/qr  — SSE stream: qr | connected | history-importing | history-done | disconnected */
 router.get("/relations/:id/whatsapp/qr", async (req, res) => {
   const relationId = Number(req.params.id);
   const contactPhone = (req.query.contactPhone as string | undefined)?.replace(/\D/g, "");
+  const historyDays = req.query.historyDays !== undefined ? Number(req.query.historyDays) : undefined;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -705,11 +735,12 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
 
   // Start or join session
   if (!session) {
-    await startSession(relationId, contactPhone);
+    await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
   } else if (contactPhone) {
     session.contactPhone = contactPhone;
     writeConfig(relationId, { contactPhone });
+    if (historyDays !== undefined) session.historyDays = historyDays;
   }
 
   session.sseClients.add(client);
