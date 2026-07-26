@@ -110,6 +110,34 @@ router.delete("/admin/users/:userId", requireAdmin, async (req, res) => {
   }
 });
 
+// ── POST /api/admin/setup-native-redirect ───────────────────────────────────
+// One-time endpoint: registers the native app redirect URL in the Clerk
+// instance that the current server uses (test in dev, live in prod).
+// Uses the server-side CLERK_SECRET_KEY so it works with the live key in prod.
+router.post("/admin/setup-native-redirect", requireAdmin, async (_req, res) => {
+  const urls = [
+    "relink-mobile://oauth-native-callback",
+    "relink-mobile:///oauth-native-callback",
+  ];
+  const results: Record<string, unknown> = {};
+  for (const url of urls) {
+    try {
+      const r = await fetch("https://api.clerk.com/v1/redirect_urls", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url }),
+      });
+      results[url] = { status: r.status, body: await r.json() };
+    } catch (e) {
+      results[url] = { error: String(e) };
+    }
+  }
+  res.json({ ok: true, results });
+});
+
 // ── GET /api/admin/offer ─────────────────────────────────────────────────────
 router.get("/admin/offer", requireAdmin, async (_req, res) => {
   // For now offer config is environment-driven; returns current defaults

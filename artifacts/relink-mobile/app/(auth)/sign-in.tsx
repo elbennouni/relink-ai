@@ -7,7 +7,7 @@ import {
 import { Link, useRouter } from 'expo-router';
 import { useSignIn, useSSO } from '@clerk/expo';
 import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
+import * as AuthSession from 'expo-auth-session';
 import colors from '@/constants/colors';
 
 function useWarmUpBrowser() {
@@ -70,9 +70,9 @@ export default function SignInScreen() {
     try {
       setSsoLoading(true);
       setSsoError('');
-      // Use a fixed 2-slash URL — Clerk's production dashboard rejects the
-      // 3-slash variant that Linking.createURL() produces for custom schemes.
-      const redirectUrl = 'relink-mobile://oauth-native-callback';
+      // AuthSession.makeRedirectUri() produces the canonical native redirect URL
+      // that Clerk expects for standalone Expo apps.
+      const redirectUrl = AuthSession.makeRedirectUri({ scheme: 'relink-mobile', path: 'oauth-native-callback' });
       const { createdSessionId, setActive } = await startSSOFlow({
         strategy: 'oauth_google',
         redirectUrl,
