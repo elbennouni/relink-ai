@@ -70,7 +70,9 @@ export default function SignInScreen() {
     try {
       setSsoLoading(true);
       setSsoError('');
-      const redirectUrl = Linking.createURL('/oauth-native-callback');
+      // Use a fixed 2-slash URL — Clerk's production dashboard rejects the
+      // 3-slash variant that Linking.createURL() produces for custom schemes.
+      const redirectUrl = 'relink-mobile://oauth-native-callback';
       const { createdSessionId, setActive } = await startSSOFlow({
         strategy: 'oauth_google',
         redirectUrl,
