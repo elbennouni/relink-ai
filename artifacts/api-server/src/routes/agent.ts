@@ -502,11 +502,10 @@ router.post("/relations/:relationId/agent/sessions/:sessionId/chat", async (req,
       { selectedContext, pastedConversation, relevantMessages }
     );
 
-    // Previous session messages for context
+    // Load ALL previous messages from this session — no limit so the AI never forgets
     const prevMessages = await db.select().from(agentMessagesTable)
       .where(eq(agentMessagesTable.sessionId, sessionId))
-      .orderBy(agentMessagesTable.createdAt)
-      .limit(20);
+      .orderBy(agentMessagesTable.createdAt);
 
     // Save user message
     await db.insert(agentMessagesTable).values({
@@ -516,11 +515,45 @@ router.post("/relations/:relationId/agent/sessions/:sessionId/chat", async (req,
       contextUsed,
     });
 
-    // Build conversation history
-    const chatHistory: Array<{ role: "user" | "assistant"; content: string | Array<{ type: string; [k: string]: unknown }> }> = prevMessages.map(m => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
+    // Build conversation history.
+    // If the session is very long (> 60 messages), keep a condensed memory of older
+    // exchanges + all recent ones, so the context window stays manageable while the
+    // AI retains everything important from the beginning.
+    const RECENT_KEEP = 50;      // always keep last 50 messages verbatim
+    const SUMMARY_THRESHOLD = 60; // above this we condense the older part
+
+    let chatHistory: Array<{ role: "user" | "assistant"; content: string | Array<{ type: string; [k: string]: unknown }> }> = [];
+
+    if (prevMessages.length > SUMMARY_THRESHOLD) {
+      const olderMessages = prevMessages.slice(0, prevMessages.length - RECENT_KEEP);
+      const recentMessages2 = prevMessages.slice(prevMessages.length - RECENT_KEEP);
+
+      // Build a compact summary of the older exchanges to inject as a system note
+      const olderSummary = olderMessages.map(m =>
+        `${m.role === "user" ? "Utilisateur" : "Coach"}: ${m.content.slice(0, 300)}${m.content.length > 300 ? "…" : ""}`
+      ).join("\n\n");
+
+      // Inject as the first user/assistant exchange so Anthropic accepts it
+      chatHistory.push({
+        role: "user",
+        content: `[RÉSUMÉ DES ÉCHANGES PRÉCÉDENTS — ${olderMessages.length} messages]\nVoici un condensé de notre conversation depuis le début pour que tu gardes tout le contexte :\n\n${olderSummary}\n\n[FIN DU RÉSUMÉ — la suite de notre conversation en détail suit]`,
+      });
+      chatHistory.push({
+        role: "assistant",
+        content: "Compris, j'ai bien toute notre conversation en mémoire depuis le début. Je continue avec ce contexte complet.",
+      });
+
+      // Then the full recent messages
+      for (const m of recentMessages2) {
+        chatHistory.push({ role: m.role as "user" | "assistant", content: m.content });
+      }
+    } else {
+      // Session short enough — pass everything verbatim
+      chatHistory = prevMessages.map(m => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
+    }
 
     // If images are attached, build a vision content array
     const userContent: string | Array<{ type: string; [k: string]: unknown }> =
