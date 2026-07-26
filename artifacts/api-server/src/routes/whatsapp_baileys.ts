@@ -238,7 +238,7 @@ async function transcribeWhatsappAudio(
 
 // ─── Start / reconnect a Baileys session ─────────────────────────────────────
 
-async function startSession(relationId: number, contactPhone?: string, historyDays?: number) {
+async function startSession(relationId: number, contactPhone?: string, historyDays?: number, skipCredsWipe = false) {
   // Close any existing session.
   // Mark it as intentionally closed BEFORE calling socket.end() so its
   // connection.update handler does NOT schedule a new startSession call.
@@ -257,7 +257,10 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
   // WhatsApp only sends history when a device is first linked.
   // If creds already exist and the user wants history, wipe them so Baileys
   // starts fresh, generates a new QR, and WhatsApp delivers the history on link.
-  if (wantsHistory) {
+  // Exception: skipCredsWipe is true when called after a 515 "restart required" —
+  // in that case Baileys just saved fresh QR-paired creds; wiping them would
+  // destroy the pairing we just completed.
+  if (wantsHistory && !skipCredsWipe) {
     const credsPath = path.join(dir, "creds.json");
     if (fs.existsSync(credsPath)) {
       console.log(`[Baileys:${relationId}] Wiping session creds for fresh history import`);
@@ -377,7 +380,7 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
         // Silent restart after QR pairing — don't show "disconnected" to the user,
         // just reconnect immediately with the freshly-saved credentials.
         console.log(`[Baileys:${relationId}] QR pairing complete — reconnecting with new creds`);
-        setTimeout(() => startSession(relationId, session.contactPhone, session.historyDays), 500);
+        setTimeout(() => startSession(relationId, session.contactPhone, session.historyDays, true /* skipCredsWipe */), 500);
       } else if (wasConnected) {
         // Transient drop after a fully-established session → reconnect
         broadcastToSession(relationId, { type: "disconnected", loggedOut: false });
