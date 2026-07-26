@@ -350,26 +350,42 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-      // Only auto-reconnect when the session was fully connected (QR scanned).
-      // If Baileys drops while still in "connecting" or "qr" state (before the
-      // user scans), do NOT reconnect automatically — repeated connection attempts
-      // cause WhatsApp to rate-limit and the QR rotation makes scanning impossible.
-      const wasConnected = session.status === "connected";
+      // 515 = "restart required" — WhatsApp intentionally sends this after a QR
+      // scan pairing to force a reconnect with the newly-saved credentials.
+      // The Baileys log says "pairing configured successfully, expect to restart".
+      // We MUST reconnect in this case even though status was still "qr".
+      const isRestartRequired = statusCode === DisconnectReason.restartRequired;
 
-      console.log(`[Baileys:${relationId}] connection closed — statusCode=${statusCode} wasConnected=${wasConnected} isLoggedOut=${isLoggedOut}`);
+      // Only auto-reconnect when:
+      //   a) WhatsApp asks for a restart after pairing (515), OR
+      //   b) The session was fully connected (QR already scanned, transient drop)
+      // Do NOT reconnect if Baileys drops while still waiting for QR scan with an
+      // unrecognised code — that causes a rate-limiting spiral.
+      const wasConnected = session.status === "connected";
+      const shouldReconnect = !isLoggedOut && (wasConnected || isRestartRequired);
+
+      console.log(`[Baileys:${relationId}] connection closed — statusCode=${statusCode} wasConnected=${wasConnected} isRestartRequired=${isRestartRequired} isLoggedOut=${isLoggedOut}`);
 
       session.status = "disconnected";
-      broadcastToSession(relationId, { type: "disconnected", loggedOut: isLoggedOut });
 
       if (isLoggedOut) {
         // WhatsApp explicitly logged this device out — wipe session files
+        broadcastToSession(relationId, { type: "disconnected", loggedOut: true });
         sessions.delete(relationId);
         fs.rmSync(dir, { recursive: true, force: true });
+      } else if (isRestartRequired) {
+        // Silent restart after QR pairing — don't show "disconnected" to the user,
+        // just reconnect immediately with the freshly-saved credentials.
+        console.log(`[Baileys:${relationId}] QR pairing complete — reconnecting with new creds`);
+        setTimeout(() => startSession(relationId, session.contactPhone, session.historyDays), 500);
       } else if (wasConnected) {
-        // Was connected (QR scanned), dropped for a transient reason → reconnect
+        // Transient drop after a fully-established session → reconnect
+        broadcastToSession(relationId, { type: "disconnected", loggedOut: false });
         setTimeout(() => startSession(relationId), 3000);
+      } else {
+        // Dropped before QR scan with unexpected code — don't reconnect, let user retry
+        broadcastToSession(relationId, { type: "disconnected", loggedOut: false });
       }
-      // else: dropped before QR scan — don't reconnect; let the user retry
     }
   });
 
