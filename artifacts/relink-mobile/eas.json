@@ -6,11 +6,17 @@
   "build": {
     "preview": {
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_DOMAIN": "ai-agent-tool-mikam514.replit.app"
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
+      "env": {
+        "EXPO_PUBLIC_DOMAIN": "ai-agent-tool-mikam514.replit.app"
+      },
       "android": {
         "buildType": "app-bundle"
       },

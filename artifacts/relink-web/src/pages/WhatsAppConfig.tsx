@@ -35,18 +35,48 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
   const [historyDone, setHistoryDone] = useState<{ imported: number } | null>(null);
   const sseRef = useRef<EventSource | null>(null);
 
-  // Check initial status
+  // Check initial status, then open SSE to stay live
   useEffect(() => {
     fetch(`/api/relations/${relationId}/whatsapp/status`)
       .then((r) => r.json())
       .then((d) => {
         setStatus(d.status ?? "none");
         if (d.contactPhone) setSavedContact(d.contactPhone);
-        if (d.status === "connected") setStatus("connected");
-        if (d.status === "connecting" || d.status === "qr") startSSE();
+        // For connecting/qr states, subscribe immediately.
+        // For connected, re-subscribe so we get future disconnection events
+        // (without historyDays the server sends "connected" + keeps connection open
+        //  until the session disconnects or this client leaves).
+        if (d.status === "connected" || d.status === "connecting" || d.status === "qr") {
+          startSSELive();
+        }
       })
       .catch(() => {});
   }, [relationId]);
+
+  /** Subscribe for live state updates WITHOUT changing current status.
+   *  Used on page load when the session is already "connected" — we keep
+   *  the SSE open so the UI learns about future disconnection events. */
+  const startSSELive = () => {
+    sseRef.current?.close();
+    const es = new EventSource(`/api/relations/${relationId}/whatsapp/qr`);
+    sseRef.current = es;
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "disconnected") {
+          setStatus(data.loggedOut ? "none" : "disconnected");
+          setQrData(null);
+          es.close();
+        }
+        // "connected" confirmation → no status change needed
+      } catch {}
+    };
+    es.onerror = () => {
+      es.close();
+      // Use functional update to read the latest status at error time
+      setStatus((prev) => (prev === "connected" ? "disconnected" : prev));
+    };
+  };
 
   const startSSE = (phone?: string, days?: string) => {
     sseRef.current?.close();
@@ -254,6 +284,43 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
               {disconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
             </Button>
           </div>
+
+          {/* History import while connected */}
+          {!historyImporting && (
+            <div className="bg-card border rounded-2xl p-4 space-y-3">
+              <p className="text-xs font-semibold flex items-center gap-1.5">
+                <History className="h-3.5 w-3.5 text-primary" /> Importer l'historique
+              </p>
+              <div className="grid grid-cols-5 gap-1.5">
+                {HISTORY_OPTIONS.filter(o => o.value !== "0").map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setHistoryPeriod(opt.value)}
+                    className={cn(
+                      "flex flex-col items-center rounded-xl border px-2 py-2.5 text-center transition-all",
+                      historyPeriod === opt.value
+                        ? "border-primary bg-primary/5 text-primary"
+                        : "border-border bg-background text-muted-foreground hover:border-primary/40"
+                    )}
+                  >
+                    <span className="text-xs font-semibold leading-tight">{opt.label}</span>
+                    <span className="text-[10px] leading-tight mt-0.5 opacity-70">{opt.desc}</span>
+                  </button>
+                ))}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-1.5"
+                onClick={() => {
+                  const phone = savedContact || contactPhone.replace(/\D/g, "");
+                  startSSE(phone || undefined, historyPeriod !== "0" ? historyPeriod : "60");
+                }}
+              >
+                <Download className="h-3.5 w-3.5" /> Synchroniser l'historique
+              </Button>
+            </div>
+          )}
         </div>
       ) : null}
     </div>

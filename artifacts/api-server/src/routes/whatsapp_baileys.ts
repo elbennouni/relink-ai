@@ -725,16 +725,23 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
   };
 
   let session = sessions.get(relationId);
+  const wantsHistoryImport = historyDays !== undefined && historyDays > 0;
 
-  // If already connected, just report status
-  if (session?.status === "connected") {
+  // If already connected and NO history import requested → confirm status immediately,
+  // then keep the SSE connection open so the client receives future state changes
+  // (e.g. session drops → "disconnected" event). The client is responsible for
+  // closing when it no longer needs live updates.
+  if (session?.status === "connected" && !wantsHistoryImport) {
     res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
-    res.end();
+    session.sseClients.add(client);
+    req.on("close", () => { session?.sseClients.delete(client); });
     return;
   }
 
-  // Start or join session
-  if (!session) {
+  // Start fresh, restart for history import, or join existing session
+  if (!session || wantsHistoryImport) {
+    // wantsHistoryImport restarts even an active session so Baileys can
+    // re-sync with syncFullHistory=true using the saved credentials.
     await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
   } else if (contactPhone) {
@@ -745,8 +752,11 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
 
   session.sseClients.add(client);
 
-  // If QR already generated, send it immediately
-  if (session.qr) {
+  // Immediately report current state to the new client (handles fast auto-reconnect)
+  if (session.status === "connected") {
+    res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+  } else if (session.qr) {
+    // QR already generated before this client connected
     res.write(`data: ${JSON.stringify({ type: "qr", data: session.qr })}\n\n`);
   }
 
