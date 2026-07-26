@@ -826,7 +826,13 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
 
   // Immediately report current state to the new client (handles fast auto-reconnect)
   if (session.status === "connected") {
-    res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+    if (session.historyImported) {
+      // History already finished while the SSE was dropped — tell the reconnected client
+      // so it doesn't sit waiting forever.
+      res.write(`data: ${JSON.stringify({ type: "history-done", imported: 0 })}\n\n`);
+    } else {
+      res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+    }
   } else if (session.qr) {
     // QR already generated before this client connected
     res.write(`data: ${JSON.stringify({ type: "qr", data: session.qr })}\n\n`);

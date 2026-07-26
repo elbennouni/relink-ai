@@ -122,7 +122,18 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
 
     es.onerror = () => {
       es.close();
-      if (status !== "connected") setStatus("disconnected");
+      if (status !== "connected") {
+        setStatus("disconnected");
+      } else if (!historyDone) {
+        // SSE proxy timeout while waiting for history — reopen after a short delay.
+        // The server will send "history-done" immediately if already finished,
+        // or keep the connection alive if still in progress.
+        setTimeout(() => {
+          if (sseRef.current === es) {
+            startSSE(phone || undefined, days);
+          }
+        }, 2000);
+      }
     };
   };
 
