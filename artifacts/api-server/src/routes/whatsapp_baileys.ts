@@ -805,10 +805,15 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
   if (!session || session.status === "disconnected") {
     await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
-  } else if (wantsHistoryImport && session.status === "connected" && !session.historyImported) {
-    // Connected, user wants history, not yet imported → restart with creds wipe.
-    // Guard on historyImported so that browser SSE auto-reconnect (5-min proxy timeout)
-    // with historyDays still in the URL does NOT re-wipe creds.
+  } else if (wantsHistoryImport && session.status === "connected" && !session.historyImported && !session.historyDays) {
+    // Connected, user wants history, not yet imported, and no history download already
+    // in progress → restart with creds wipe so WhatsApp delivers history on fresh link.
+    // Double guard:
+    //   - historyImported: true once messages.history-set finished
+    //   - historyDays already set: means startSession was already called with history
+    //     (active download in progress). A bare SSE reconnect after the 5-min Replit
+    //     proxy timeout must NOT re-trigger a creds wipe — it should just subscribe to
+    //     the ongoing session and wait for the history-done event.
     await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
   } else if (!sessionBusy && contactPhone) {
