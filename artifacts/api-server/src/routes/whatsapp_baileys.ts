@@ -34,6 +34,8 @@ interface Session {
   qr?: string; // base64 QR image
   contactPhone?: string; // e.g. "33612345678" (no +)
   historyDays?: number; // 0 = no history, 7/60/180/3650 = import window
+  intentionalClose?: boolean; // set before socket.end() to prevent the connection.update handler from re-scheduling startSession
+  historyImported?: boolean; // true once messages.history-set finished — prevents SSE reconnects from re-triggering a creds wipe
   sseClients: Set<{ write: (data: string) => void; end: () => void }>;
 }
 
@@ -237,9 +239,12 @@ async function transcribeWhatsappAudio(
 // ─── Start / reconnect a Baileys session ─────────────────────────────────────
 
 async function startSession(relationId: number, contactPhone?: string, historyDays?: number) {
-  // Close any existing session
+  // Close any existing session.
+  // Mark it as intentionally closed BEFORE calling socket.end() so its
+  // connection.update handler does NOT schedule a new startSession call.
   const existing = sessions.get(relationId);
   if (existing) {
+    existing.intentionalClose = true;
     try { existing.socket.end(undefined); } catch { /* ignore */ }
     sessions.delete(relationId);
   }
@@ -337,6 +342,11 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
     }
 
     if (connection === "close") {
+      // If we intentionally closed this socket (e.g. startSession replaced it),
+      // do NOT schedule a reconnect — that would start a second parallel session
+      // and create an infinite double-reconnect loop.
+      if (session.intentionalClose) return;
+
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       session.status = "disconnected";
@@ -698,6 +708,7 @@ JSON attendu UNIQUEMENT :
     broadcastToSession(relationId, { type: "history-importing", total: filtered.length });
     // Skip audio transcription for history (too slow for bulk); store as [Message vocal]
     await storeMessages(filtered, true);
+    session.historyImported = true;
     broadcastToSession(relationId, { type: "history-done", imported: filtered.length });
   });
 }
@@ -764,8 +775,10 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
   if (!session) {
     await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
-  } else if (wantsHistoryImport && session.status === "connected") {
-    // Connected but user explicitly wants a history re-import → restart with creds wipe
+  } else if (wantsHistoryImport && session.status === "connected" && !session.historyImported) {
+    // Connected, user wants history, and it hasn't been imported yet → restart with creds wipe.
+    // If historyImported=true the SSE browser auto-reconnect (after 5-min proxy timeout) arrives
+    // here; we must NOT restart in that case or we'd wipe creds and loop forever.
     await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
   } else if (!sessionBusy && contactPhone) {
