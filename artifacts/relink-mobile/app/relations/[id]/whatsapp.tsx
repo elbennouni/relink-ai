@@ -123,6 +123,9 @@ export default function WhatsAppScreen() {
           }
         }
       }
+      // Stream ended cleanly without a terminal event (proxy timeout, server restart…)
+      // Fall back to disconnected so the user can retry rather than staying stuck.
+      setStatus((prev) => (prev === 'connecting' || prev === 'qr') ? 'disconnected' : prev);
     } catch (e: any) {
       if (e?.name !== 'AbortError') setStatus('disconnected');
     }
