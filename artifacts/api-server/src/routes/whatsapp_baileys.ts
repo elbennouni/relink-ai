@@ -23,6 +23,10 @@ import crypto from "crypto";
 
 const router = Router();
 
+// Fetch Baileys version once at startup and cache it
+let baileysVersion: [number, number, number] = [2, 3000, 1015920855]; // safe fallback
+fetchLatestBaileysVersion().then(({ version }) => { baileysVersion = version; }).catch(() => {});
+
 // ─── Session store (in-memory, keyed by relationId) ──────────────────────────
 interface Session {
   socket: ReturnType<typeof makeWASocket>;
@@ -275,7 +279,7 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
   sessions.set(relationId, session);
 
   const sock = makeWASocket({
-    version,
+    version: baileysVersion,
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, console as unknown as Parameters<typeof makeCacheableSignalKeyStore>[1]),
