@@ -241,6 +241,21 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
   }
 
   const dir = sessionDir(relationId);
+
+  // syncFullHistory = true when the user asked for historical import
+  const wantsHistory = historyDays !== undefined && historyDays > 0;
+
+  // WhatsApp only sends history when a device is first linked.
+  // If creds already exist and the user wants history, wipe them so Baileys
+  // starts fresh, generates a new QR, and WhatsApp delivers the history on link.
+  if (wantsHistory) {
+    const credsPath = path.join(dir, "creds.json");
+    if (fs.existsSync(credsPath)) {
+      console.log(`[Baileys:${relationId}] Wiping session creds for fresh history import`);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   fs.mkdirSync(dir, { recursive: true });
 
   // Persist config
@@ -249,10 +264,6 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
   writeConfig(relationId, { contactPhone: phone });
 
   const { state, saveCreds } = await useMultiFileAuthState(dir);
-  const { version } = await fetchLatestBaileysVersion();
-
-  // syncFullHistory = true when the user asked for historical import
-  const wantsHistory = historyDays !== undefined && historyDays > 0;
 
   const session: Session = {
     socket: null as unknown as ReturnType<typeof makeWASocket>,
