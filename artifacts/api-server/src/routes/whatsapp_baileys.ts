@@ -715,7 +715,7 @@ JSON attendu UNIQUEMENT :
   });
 
   // ── Historical messages (WhatsApp delivers past conversations on connect) ──
-  sock.ev.on("messages.history-set", async ({ messages, isLatest }) => {
+  sock.ev.on("messaging-history.set", async ({ messages, isLatest }) => {
     console.log(`[Baileys] history-set: ${messages.length} messages (isLatest=${isLatest}) for relation ${relationId}`);
 
     // Filter by requested history window
