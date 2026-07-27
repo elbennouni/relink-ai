@@ -718,20 +718,36 @@ JSON attendu UNIQUEMENT :
   sock.ev.on("messaging-history.set", async ({ messages, isLatest }) => {
     console.log(`[Baileys] history-set: ${messages.length} messages (isLatest=${isLatest}) for relation ${relationId}`);
 
-    // Filter by requested history window
     const days = session.historyDays;
-    let filtered = messages as WAMessage[];
+    if (days === 0) {
+      console.log(`[Baileys] history-set: skipping (historyDays=0)`);
+      return;
+    }
+
+    // ── Step 1: keep only messages from/to this relation's contact ────────────
+    // WhatsApp history delivers ALL conversations — we must discard everything
+    // that doesn't belong to this relation's contactPhone.
+    const myContactPhone = session.contactPhone?.replace(/\D/g, "");
+    let filtered = (messages as WAMessage[]).filter((m) => {
+      const jid = m.key.remoteJid ?? "";
+      // Always skip groups and broadcasts
+      if (jid.endsWith("@g.us") || jid.endsWith("@broadcast")) return false;
+      // If we don't know the contact yet, keep it (storeMessages will re-filter)
+      if (!myContactPhone) return true;
+      const resolved = jidToPhone(jid);
+      // Accept if resolved matches, or if unresolved (LID not yet in map — let storeMessages handle it)
+      return resolved === "" || phonesMatch(resolved, myContactPhone);
+    });
+    console.log(`[Baileys] history-set: contact filter kept ${filtered.length}/${messages.length} (contactPhone=${myContactPhone ?? "unknown"})`);
+
+    // ── Step 2: filter by requested history window ────────────────────────────
     if (days !== undefined && days > 0) {
       const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
       filtered = filtered.filter((m) => {
         const ts = Number(m.messageTimestamp) * 1000;
         return ts >= cutoff;
       });
-      console.log(`[Baileys] history-set: kept ${filtered.length}/${messages.length} within last ${days} days`);
-    } else if (days === 0) {
-      // User explicitly requested no history import
-      console.log(`[Baileys] history-set: skipping (historyDays=0)`);
-      return;
+      console.log(`[Baileys] history-set: kept ${filtered.length} within last ${days} days`);
     }
 
     if (filtered.length === 0) {
