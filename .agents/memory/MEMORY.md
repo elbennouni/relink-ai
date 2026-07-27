@@ -1,3 +1,4 @@
+- [Baileys history sync event names](baileys-history-event.md) — event is `messaging-history.set` (NOT `messages.history-set`); also must override `shouldSyncHistoryMessage: () => true` alongside `syncFullHistory: true`
 - [ReLink AI stack](relink-stack.md) — Anthropic SSE routes must use fetch+ReadableStream, not orval hooks; api-zod is empty (export {}), use manual zod schemas in routes
 - [Clerk live vs test user IDs](clerk-live-userid.md) — Replit auto-swaps keys at publish; same email gets different userId in dev vs prod; mobile app must fetch pk from /api/config
 - [API server build quirks](api-server-build.md) — zod must be in api-server dependencies explicitly; health.ts must not import from api-zod; useToast lives in @/hooks/use-toast not @/components/ui/toast
