@@ -266,6 +266,13 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
       console.log(`[Baileys:${relationId}] Wiping session creds for fresh history import`);
       fs.rmSync(dir, { recursive: true, force: true });
     }
+    // Purge any previously imported messages so we start clean.
+    // This prevents stale/mixed messages from a prior import from lingering.
+    const deleted = await db
+      .delete(whatsappMessagesTable)
+      .where(eq(whatsappMessagesTable.relationId, relationId))
+      .returning({ id: whatsappMessagesTable.id });
+    console.log(`[Baileys:${relationId}] Purged ${deleted.length} old messages before fresh history import`);
   }
 
   fs.mkdirSync(dir, { recursive: true });
