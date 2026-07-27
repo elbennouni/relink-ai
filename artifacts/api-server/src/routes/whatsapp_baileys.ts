@@ -294,6 +294,10 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
     },
     printQRInTerminal: false,
     syncFullHistory: wantsHistory,
+    // Baileys' default shouldSyncHistoryMessage returns false for FULL sync type,
+    // silently dropping all FULL history chunks even when syncFullHistory=true.
+    // Override to accept all sync types when the user requested history import.
+    ...(wantsHistory && { shouldSyncHistoryMessage: () => true }),
     // Returning a non-undefined value is critical — Baileys drops incoming
     // messages silently when getMessage returns undefined (needed for retries).
     getMessage: async (_key) => ({ conversation: "" }),
