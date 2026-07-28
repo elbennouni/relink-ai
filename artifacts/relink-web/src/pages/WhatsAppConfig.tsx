@@ -93,6 +93,12 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
     const es = new EventSource(url);
     sseRef.current = es;
 
+    // Local flags — not React state, so no stale-closure risk.
+    // receivedConnected: true once we get a "connected" event on THIS SSE instance.
+    // receivedHistoryDone: true once history import finished on THIS SSE instance.
+    let receivedConnected = false;
+    let receivedHistoryDone = false;
+
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -100,12 +106,14 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
           setStatus("qr");
           setQrData(data.data);
         } else if (data.type === "connected") {
+          receivedConnected = true;
           setStatus("connected");
           setQrData(null);
           toast({ title: "WhatsApp connecté ✓", description: "Les messages arrivent en temps réel." });
         } else if (data.type === "history-importing") {
           setHistoryImporting({ total: data.total });
         } else if (data.type === "history-done") {
+          receivedHistoryDone = true;
           setHistoryImporting(null);
           setHistoryDone({ imported: data.imported });
           if (data.imported > 0) {
@@ -122,17 +130,18 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
 
     es.onerror = () => {
       es.close();
-      if (status !== "connected") {
-        setStatus("disconnected");
-      } else if (!historyDone) {
-        // SSE proxy timeout while waiting for history — reopen after a short delay.
-        // The server will send "history-done" immediately if already finished,
-        // or keep the connection alive if still in progress.
+      if (receivedConnected && !receivedHistoryDone) {
+        // SSE proxy timeout (Replit 5-min limit) while waiting for history on an
+        // already-connected session — reopen so we catch the "history-done" event.
+        // Only auto-reconnect when we ACTUALLY received "connected" on this instance,
+        // not when status was "connected" before the user clicked (stale closure bug).
         setTimeout(() => {
           if (sseRef.current === es) {
             startSSE(phone || undefined, days);
           }
         }, 2000);
+      } else {
+        setStatus("disconnected");
       }
     };
   };
