@@ -117,6 +117,8 @@ export default function Workspace() {
   const [introTriggered, setIntroTriggered] = useState(false);
 
   const agentScrollRef = useRef<HTMLDivElement>(null);
+  // true when the agent chat scroll container is at (or very near) the bottom
+  const agentIsAtBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Measures the input area to set dynamic bottom padding on the agent scroll area
   const inputAreaRef = useRef<HTMLDivElement>(null);
@@ -732,10 +734,14 @@ export default function Workspace() {
     }
   };
 
-  // ── Auto-scroll agent chat on new content ──────────────────────────────────
+  // ── Auto-scroll agent chat on new content ─────────────────────────────────
+  // Only scroll to bottom if the user is already at the bottom (agentIsAtBottom).
+  // If they scrolled up to read older messages, respect that position.
   useEffect(() => {
-    if (agentScrollRef.current) {
-      agentScrollRef.current.scrollTop = agentScrollRef.current.scrollHeight;
+    const el = agentScrollRef.current;
+    if (!el) return;
+    if (agentIsAtBottom.current) {
+      el.scrollTop = el.scrollHeight;
     }
   }, [localMessages]);
 
@@ -871,6 +877,12 @@ export default function Workspace() {
         { id: userId, role: "user", content: displayContent },
         { id: assistantId, role: "assistant", content: "", isStreaming: true },
       ]);
+      // When the user sends a message, always scroll to bottom and reset the flag
+      agentIsAtBottom.current = true;
+      setTimeout(() => {
+        const el = agentScrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      }, 30);
       setIsStreaming(true);
 
       try {
@@ -1740,6 +1752,11 @@ export default function Workspace() {
             ref={agentScrollRef}
             className="h-full overflow-y-auto p-4 md:p-6 space-y-6 pt-6"
             style={{ paddingBottom: inputAreaHeight }}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              // Consider "at bottom" if within 80 px of the bottom edge
+              agentIsAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            }}
           >
             <AgentBubble content="Je suis là pour analyser ces échanges avec vous. Sélectionnez un message ou posez une question générale." />
 
