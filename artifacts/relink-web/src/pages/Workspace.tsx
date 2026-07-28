@@ -1143,11 +1143,11 @@ export default function Workspace() {
                   </span>
                 )}
               </div>
-              <div className="text-xs text-muted-foreground">
-                {totalMessages > 0
-                  ? `${waMessages.length} / ${totalMessages.toLocaleString("fr-FR")} messages`
-                  : "0 messages"}
-              </div>
+              {waLiveStatus === "connected" && totalMessages > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  {waMessages.length} / {totalMessages.toLocaleString("fr-FR")} messages
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-1">

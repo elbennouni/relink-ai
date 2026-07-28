@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { runLegacyMigration } from "./lib/legacyMigration";
 import { startScheduledMessageJob } from "./routes/schedule_message";
+import { startDailyPowerJob } from "./lib/dailyPowerJob";
 
 const rawPort = process.env["PORT"];
 
@@ -31,4 +32,7 @@ app.listen(port, async (err) => {
 
   // Start background job for scheduled messages (timer de réponse)
   startScheduledMessageJob();
+
+  // Refresh power-balance analysis for all relations once a day
+  startDailyPowerJob();
 });

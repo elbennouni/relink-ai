@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useListRelations, Relation } from "@workspace/api-client-react";
 import { Link, useLocation } from "wouter";
 import { Plus, MessageSquarePlus, Image as ImageIcon, Upload, ChevronRight, Lock, MoreVertical, Pencil, Trash2, Loader2 } from "lucide-react";
@@ -274,12 +274,37 @@ function RelationCard({ relation, onEdit, onDelete }: {
   onDelete: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [waStatus, setWaStatus] = useState<"none" | "connected" | "connecting" | "disconnected" | "failed">("none");
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      fetch(`/api/relations/${relation.id}/whatsapp/status`)
+        .then(r => r.json())
+        .then(d => { if (!cancelled) setWaStatus(d.status ?? "none"); })
+        .catch(() => {});
+    };
+    check();
+    const iv = setInterval(check, 30_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [relation.id]);
 
   return (
     <div className="relative group flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl border bg-card hover:border-primary/20 transition-all hover:shadow-md">
       {/* Zone cliquable principale */}
       <Link href={`/relations/${relation.id}`} className="flex-1 min-w-0">
         <div className="flex items-center gap-3 mb-2">
+          {/* Pastille de statut WhatsApp */}
+          <span
+            title={waStatus === "connected" ? "WhatsApp connecté" : waStatus === "connecting" ? "Connexion en cours…" : "WhatsApp déconnecté"}
+            className={cn(
+              "h-3 w-3 rounded-full shrink-0 border-2 border-background shadow-sm transition-colors",
+              waStatus === "connected" && "bg-green-500",
+              (waStatus === "disconnected" || waStatus === "failed") && "bg-red-500",
+              (waStatus === "connecting") && "bg-amber-400 animate-pulse",
+              waStatus === "none" && "bg-muted-foreground/30",
+            )}
+          />
           <h3 className="font-serif text-xl">{relation.name}</h3>
           {relation.status === "active" && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary/10 text-secondary-foreground border border-secondary/20">
@@ -289,7 +314,7 @@ function RelationCard({ relation, onEdit, onDelete }: {
           )}
         </div>
         <p className="text-sm text-muted-foreground">
-          {relation.messageCount} messages au total
+          {relation.messageCount > 0 && <>{relation.messageCount} messages{waStatus === "connected" && <span className="text-green-600 font-medium"> · en direct</span>}</>}
           {relation.lastMessageAt && (
             <> · Dernier message {formatDistanceToNow(new Date(relation.lastMessageAt), { addSuffix: true, locale: fr })}</>
           )}
