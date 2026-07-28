@@ -36,8 +36,14 @@ interface Session {
   historyDays?: number; // 0 = no history, 7/60/180/3650 = import window
   intentionalClose?: boolean; // set before socket.end() to prevent the connection.update handler from re-scheduling startSession
   historyImported?: boolean; // true once messages.history-set finished — prevents SSE reconnects from re-triggering a creds wipe
+  credsWipedThisCycle?: boolean; // true once creds were wiped in this connect cycle — prevents re-wiping on retry
+  failedAt?: number; // epoch ms when a 405/pre-QR failure occurred — enforces server-side cooldown
   sseClients: Set<{ write: (data: string) => void; end: () => void }>;
 }
+
+// Minimum ms between registration attempts after a 405.
+// WhatsApp rate-limit resets every ~5 min; we use 6 min to be safe.
+const RETRY_COOLDOWN_MS = 6 * 60 * 1000;
 
 const sessions = new Map<number, Session>();
 
@@ -284,11 +290,16 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
 
   const { state, saveCreds } = await useMultiFileAuthState(dir);
 
+  // Carry over the credsWipedThisCycle flag so a skipCredsWipe re-entry
+  // (515 restart) doesn't falsely think creds were never wiped.
+  const prevCredsWiped = existing?.credsWipedThisCycle ?? false;
+
   const session: Session = {
     socket: null as unknown as ReturnType<typeof makeWASocket>,
     status: "connecting",
     contactPhone: phone,
     historyDays,
+    credsWipedThisCycle: prevCredsWiped || (wantsHistory && !skipCredsWipe),
     sseClients: new Set(),
   };
   sessions.set(relationId, session);
@@ -402,8 +413,10 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
         // SSE endpoint does NOT restart automatically on proxy-timeout reconnect.
         // The user must explicitly click "Générer le QR code" to retry.
         session.status = "failed";
-        console.log(`[Baileys:${relationId}] Connection failed before QR (statusCode=${statusCode}) — waiting for user to retry`);
-        broadcastToSession(relationId, { type: "failed", statusCode });
+        session.failedAt = Date.now();
+        const retryAfter = Math.ceil(RETRY_COOLDOWN_MS / 1000); // seconds
+        console.log(`[Baileys:${relationId}] Connection failed before QR (statusCode=${statusCode}) — cooldown ${retryAfter}s`);
+        broadcastToSession(relationId, { type: "failed", statusCode, retryAfter });
       }
     }
   });
@@ -843,12 +856,29 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
     // not when the Replit proxy auto-reconnects after 5 min.
     const isExplicitRetry = !!(contactPhone || historyDays !== undefined);
     if (isExplicitRetry) {
-      await startSession(relationId, contactPhone, historyDays);
+      // Enforce server-side cooldown — don't let the client spam registration attempts.
+      const elapsed = session.failedAt ? Date.now() - session.failedAt : Infinity;
+      if (elapsed < RETRY_COOLDOWN_MS) {
+        const retryAfter = Math.ceil((RETRY_COOLDOWN_MS - elapsed) / 1000);
+        session.sseClients.add(client);
+        res.write(`data: ${JSON.stringify({ type: "failed", retryAfter })}\n\n`);
+        req.on("close", () => { session?.sseClients.delete(client); });
+        console.log(`[Baileys:${relationId}] Retry blocked — cooldown ${retryAfter}s remaining`);
+        return;
+      }
+      // Don't wipe creds again if we already wiped them in this connect cycle —
+      // re-wiping just adds another fresh registration attempt and makes the 405 worse.
+      const skipWipe = session.credsWipedThisCycle ?? false;
+      await startSession(relationId, contactPhone, historyDays, skipWipe);
       session = sessions.get(relationId)!;
     } else {
-      // Proxy auto-reconnect — just report the failed state; don't retry.
+      // Proxy auto-reconnect — just report the failed state with remaining cooldown.
+      const elapsed = session.failedAt ? Date.now() - session.failedAt : Infinity;
+      const retryAfter = elapsed < RETRY_COOLDOWN_MS
+        ? Math.ceil((RETRY_COOLDOWN_MS - elapsed) / 1000)
+        : 0;
       session.sseClients.add(client);
-      res.write(`data: ${JSON.stringify({ type: "failed" })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "failed", retryAfter })}\n\n`);
       req.on("close", () => { session?.sseClients.delete(client); });
       return;
     }

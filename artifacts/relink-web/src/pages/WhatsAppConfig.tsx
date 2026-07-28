@@ -33,7 +33,12 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
   const [historyPeriod, setHistoryPeriod] = useState<HistoryPeriod>("60");
   const [historyImporting, setHistoryImporting] = useState<{ total: number } | null>(null);
   const [historyDone, setHistoryDone] = useState<{ imported: number } | null>(null);
+  const [retryCountdown, setRetryCountdown] = useState(0); // seconds remaining before retry allowed
   const sseRef = useRef<EventSource | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clean up countdown on unmount
+  useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current); }, []);
 
   // Check initial status, then open SSE to stay live
   useEffect(() => {
@@ -128,6 +133,17 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
           setStatus("failed");
           setQrData(null);
           es.close();
+          // Start countdown if the server sent a retryAfter value
+          if (data.retryAfter && data.retryAfter > 0) {
+            setRetryCountdown(data.retryAfter);
+            if (countdownRef.current) clearInterval(countdownRef.current);
+            countdownRef.current = setInterval(() => {
+              setRetryCountdown((s) => {
+                if (s <= 1) { clearInterval(countdownRef.current!); return 0; }
+                return s - 1;
+              });
+            }, 1000);
+          }
         }
       } catch { /* ignore */ }
     };
@@ -198,9 +214,19 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
             </div>
           )}
           {status === "failed" && (
-            <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              <WifiOff className="h-3.5 w-3.5 shrink-0" />
-              WhatsApp a rejeté la connexion (trop de tentatives). Attends 1–2 minutes puis réessaie.
+            <div className="flex flex-col gap-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
+              <div className="flex items-center gap-2 font-medium">
+                <WifiOff className="h-3.5 w-3.5 shrink-0" />
+                WhatsApp a rejeté la connexion — trop de tentatives d'enregistrement.
+              </div>
+              {retryCountdown > 0 ? (
+                <p className="text-red-600 pl-5">
+                  Réessaie dans <span className="font-bold tabular-nums">{Math.floor(retryCountdown / 60)}:{String(retryCountdown % 60).padStart(2, "0")}</span>
+                  {" "}— chaque tentative prématurée rallonge le blocage.
+                </p>
+              ) : (
+                <p className="text-red-600 pl-5">Tu peux réessayer maintenant.</p>
+              )}
             </div>
           )}
           <div className="space-y-1.5">
@@ -244,8 +270,11 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
             )}
           </div>
 
-          <Button onClick={handleConnect} className="w-full">
-            <QrCode className="h-4 w-4 mr-2" /> Générer le QR code
+          <Button onClick={handleConnect} className="w-full" disabled={retryCountdown > 0}>
+            <QrCode className="h-4 w-4 mr-2" />
+            {retryCountdown > 0
+              ? `Patienter ${Math.floor(retryCountdown / 60)}:${String(retryCountdown % 60).padStart(2, "0")}…`
+              : "Générer le QR code"}
           </Button>
         </div>
       ) : status === "connecting" ? (
