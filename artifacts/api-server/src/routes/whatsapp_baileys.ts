@@ -30,7 +30,7 @@ fetchLatestBaileysVersion().then(({ version }) => { baileysVersion = version; })
 // ─── Session store (in-memory, keyed by relationId) ──────────────────────────
 interface Session {
   socket: ReturnType<typeof makeWASocket>;
-  status: "connecting" | "qr" | "connected" | "disconnected";
+  status: "connecting" | "qr" | "connected" | "disconnected" | "failed";
   qr?: string; // base64 QR image
   contactPhone?: string; // e.g. "33612345678" (no +)
   historyDays?: number; // 0 = no history, 7/60/180/3650 = import window
@@ -380,25 +380,30 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
 
       console.log(`[Baileys:${relationId}] connection closed — statusCode=${statusCode} wasConnected=${wasConnected} isRestartRequired=${isRestartRequired} isLoggedOut=${isLoggedOut}`);
 
-      session.status = "disconnected";
-
       if (isLoggedOut) {
+        session.status = "disconnected";
         // WhatsApp explicitly logged this device out — wipe session files
         broadcastToSession(relationId, { type: "disconnected", loggedOut: true });
         sessions.delete(relationId);
         fs.rmSync(dir, { recursive: true, force: true });
       } else if (isRestartRequired) {
+        session.status = "disconnected";
         // Silent restart after QR pairing — don't show "disconnected" to the user,
         // just reconnect immediately with the freshly-saved credentials.
         console.log(`[Baileys:${relationId}] QR pairing complete — reconnecting with new creds`);
         setTimeout(() => startSession(relationId, session.contactPhone, session.historyDays, true /* skipCredsWipe */), 500);
       } else if (wasConnected) {
+        session.status = "disconnected";
         // Transient drop after a fully-established session → reconnect
         broadcastToSession(relationId, { type: "disconnected", loggedOut: false });
         setTimeout(() => startSession(relationId), 3000);
       } else {
-        // Dropped before QR scan with unexpected code — don't reconnect, let user retry
-        broadcastToSession(relationId, { type: "disconnected", loggedOut: false });
+        // Dropped before QR scan (e.g. 405 rate-limit) — mark as "failed" so the
+        // SSE endpoint does NOT restart automatically on proxy-timeout reconnect.
+        // The user must explicitly click "Générer le QR code" to retry.
+        session.status = "failed";
+        console.log(`[Baileys:${relationId}] Connection failed before QR (statusCode=${statusCode}) — waiting for user to retry`);
+        broadcastToSession(relationId, { type: "failed", statusCode });
       }
     }
   });
@@ -832,6 +837,21 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
   if (!session || session.status === "disconnected") {
     await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
+  } else if (session.status === "failed") {
+    // Previous attempt failed (e.g. 405 rate-limit before QR was shown).
+    // Only restart if the user explicitly triggered this SSE (has query params),
+    // not when the Replit proxy auto-reconnects after 5 min.
+    const isExplicitRetry = !!(contactPhone || historyDays !== undefined);
+    if (isExplicitRetry) {
+      await startSession(relationId, contactPhone, historyDays);
+      session = sessions.get(relationId)!;
+    } else {
+      // Proxy auto-reconnect — just report the failed state; don't retry.
+      session.sseClients.add(client);
+      res.write(`data: ${JSON.stringify({ type: "failed" })}\n\n`);
+      req.on("close", () => { session?.sseClients.delete(client); });
+      return;
+    }
   } else if (wantsHistoryImport && session.status === "connected" && !session.historyImported && !session.historyDays) {
     // Connected, user wants history, not yet imported, and no history download already
     // in progress → restart with creds wipe so WhatsApp delivers history on fresh link.

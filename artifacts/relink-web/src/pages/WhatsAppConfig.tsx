@@ -25,7 +25,7 @@ const HISTORY_OPTIONS: { value: HistoryPeriod; label: string; desc: string }[] =
 
 function QRTab({ relationId, relationName }: { relationId: number; relationName: string }) {
   const { toast } = useToast();
-  const [status, setStatus] = useState<"none" | "connecting" | "qr" | "connected" | "disconnected">("none");
+  const [status, setStatus] = useState<"none" | "connecting" | "qr" | "connected" | "disconnected" | "failed">("none");
   const [qrData, setQrData] = useState<string | null>(null);
   const [contactPhone, setContactPhone] = useState("");
   const [savedContact, setSavedContact] = useState<string | undefined>();
@@ -124,6 +124,10 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
           setStatus(data.loggedOut ? "none" : "disconnected");
           setQrData(null);
           es.close();
+        } else if (data.type === "failed") {
+          setStatus("failed");
+          setQrData(null);
+          es.close();
         }
       } catch { /* ignore */ }
     };
@@ -185,12 +189,18 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
         </ol>
       </div>
 
-      {status === "none" || status === "disconnected" ? (
+      {status === "none" || status === "disconnected" || status === "failed" ? (
         <div className="bg-card border rounded-2xl p-5 space-y-4">
           {status === "disconnected" && (
             <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               <WifiOff className="h-3.5 w-3.5 shrink-0" />
               Connexion perdue. Reconnecte-toi.
+            </div>
+          )}
+          {status === "failed" && (
+            <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <WifiOff className="h-3.5 w-3.5 shrink-0" />
+              WhatsApp a rejeté la connexion (trop de tentatives). Attends 1–2 minutes puis réessaie.
             </div>
           )}
           <div className="space-y-1.5">
