@@ -11,14 +11,15 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 type Tab = "qr" | "business";
-type HistoryPeriod = "0" | "7" | "60" | "180" | "3650";
+type HistoryPeriod = "0" | "1" | "7" | "60" | "180" | "3650";
 
 const HISTORY_OPTIONS: { value: HistoryPeriod; label: string; desc: string }[] = [
-  { value: "0",    label: "Aucun",    desc: "Temps réel seulement" },
-  { value: "7",    label: "1 semaine", desc: "7 derniers jours" },
-  { value: "60",   label: "2 mois",    desc: "60 derniers jours" },
-  { value: "180",  label: "6 mois",    desc: "180 derniers jours" },
-  { value: "3650", label: "Tout",      desc: "Historique complet" },
+  { value: "0",    label: "Aucun",      desc: "Temps réel seulement" },
+  { value: "1",    label: "Aujourd'hui", desc: "Dernières 24h" },
+  { value: "7",    label: "1 semaine",  desc: "7 derniers jours" },
+  { value: "60",   label: "2 mois",     desc: "60 derniers jours" },
+  { value: "180",  label: "6 mois",     desc: "180 derniers jours" },
+  { value: "3650", label: "Tout",       desc: "Historique complet" },
 ];
 
 // ─── QR Code Tab ─────────────────────────────────────────────────────────────
@@ -245,7 +246,7 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
             <label className="text-xs font-semibold flex items-center gap-1.5">
               <History className="h-3.5 w-3.5 text-primary" /> Historique à importer
             </label>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-6 gap-1.5">
               {HISTORY_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
@@ -350,7 +351,7 @@ function QRTab({ relationId, relationName }: { relationId: number; relationName:
               <p className="text-xs font-semibold flex items-center gap-1.5">
                 <History className="h-3.5 w-3.5 text-primary" /> Importer l'historique
               </p>
-              <div className="grid grid-cols-5 gap-1.5">
+              <div className="grid grid-cols-6 gap-1.5">
                 {HISTORY_OPTIONS.filter(o => o.value !== "0").map((opt) => (
                   <button
                     key={opt.value}

@@ -36,7 +36,6 @@ interface Session {
   historyDays?: number; // 0 = no history, 7/60/180/3650 = import window
   intentionalClose?: boolean; // set before socket.end() to prevent the connection.update handler from re-scheduling startSession
   historyImported?: boolean; // true once messages.history-set finished — prevents SSE reconnects from re-triggering a creds wipe
-  credsWipedThisCycle?: boolean; // true once creds were wiped in this connect cycle — prevents re-wiping on retry
   failedAt?: number; // epoch ms when a 405/pre-QR failure occurred — enforces server-side cooldown
   sseClients: Set<{ write: (data: string) => void; end: () => void }>;
 }
@@ -257,28 +256,24 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
 
   const dir = sessionDir(relationId);
 
-  // syncFullHistory = true when the user asked for historical import
+  // syncFullHistory = true → Baileys requests full history from WhatsApp on every
+  // connect. WhatsApp pushes it via messaging-history.set. We no longer need to
+  // wipe credentials to receive history — keeping existing creds avoids forcing
+  // a new device registration (which causes 405 rate-limit errors).
   const wantsHistory = historyDays !== undefined && historyDays > 0;
 
-  // WhatsApp only sends history when a device is first linked.
-  // If creds already exist and the user wants history, wipe them so Baileys
-  // starts fresh, generates a new QR, and WhatsApp delivers the history on link.
-  // Exception: skipCredsWipe is true when called after a 515 "restart required" —
-  // in that case Baileys just saved fresh QR-paired creds; wiping them would
-  // destroy the pairing we just completed.
+  // Purge previously imported messages so the re-import starts clean.
+  // We do this regardless of whether creds exist — persistMessage uses
+  // onConflictDoNothing so there are no duplicates even without the purge,
+  // but purging keeps the DB tidy when the user changes the history window.
+  // We do NOT wipe the creds directory; keeping it prevents a new device
+  // registration and eliminates the 405 rate-limit risk entirely.
   if (wantsHistory && !skipCredsWipe) {
-    const credsPath = path.join(dir, "creds.json");
-    if (fs.existsSync(credsPath)) {
-      console.log(`[Baileys:${relationId}] Wiping session creds for fresh history import`);
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-    // Purge any previously imported messages so we start clean.
-    // This prevents stale/mixed messages from a prior import from lingering.
     const deleted = await db
       .delete(whatsappMessagesTable)
       .where(eq(whatsappMessagesTable.relationId, relationId))
       .returning({ id: whatsappMessagesTable.id });
-    console.log(`[Baileys:${relationId}] Purged ${deleted.length} old messages before fresh history import`);
+    console.log(`[Baileys:${relationId}] Purged ${deleted.length} old messages before history re-import (creds kept)`);
   }
 
   fs.mkdirSync(dir, { recursive: true });
@@ -290,16 +285,11 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
 
   const { state, saveCreds } = await useMultiFileAuthState(dir);
 
-  // Carry over the credsWipedThisCycle flag so a skipCredsWipe re-entry
-  // (515 restart) doesn't falsely think creds were never wiped.
-  const prevCredsWiped = existing?.credsWipedThisCycle ?? false;
-
   const session: Session = {
     socket: null as unknown as ReturnType<typeof makeWASocket>,
     status: "connecting",
     contactPhone: phone,
     historyDays,
-    credsWipedThisCycle: prevCredsWiped || (wantsHistory && !skipCredsWipe),
     sseClients: new Set(),
   };
   sessions.set(relationId, session);
@@ -311,11 +301,12 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
       keys: makeCacheableSignalKeyStore(state.keys, console as unknown as Parameters<typeof makeCacheableSignalKeyStore>[1]),
     },
     printQRInTerminal: false,
-    syncFullHistory: wantsHistory,
-    // Baileys' default shouldSyncHistoryMessage returns false for FULL sync type,
-    // silently dropping all FULL history chunks even when syncFullHistory=true.
-    // Override to accept all sync types when the user requested history import.
-    ...(wantsHistory && { shouldSyncHistoryMessage: () => true }),
+    // Always request full history sync — WhatsApp will push messaging-history.set
+    // on every connect regardless of whether creds are fresh or existing.
+    // shouldSyncHistoryMessage must be overridden: Baileys' default returns false
+    // for FULL sync type, silently dropping all history chunks.
+    syncFullHistory: true,
+    shouldSyncHistoryMessage: () => true,
     // Returning a non-undefined value is critical — Baileys drops incoming
     // messages silently when getMessage returns undefined (needed for retries).
     getMessage: async (_key) => ({ conversation: "" }),
@@ -866,10 +857,7 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
         console.log(`[Baileys:${relationId}] Retry blocked — cooldown ${retryAfter}s remaining`);
         return;
       }
-      // Don't wipe creds again if we already wiped them in this connect cycle —
-      // re-wiping just adds another fresh registration attempt and makes the 405 worse.
-      const skipWipe = session.credsWipedThisCycle ?? false;
-      await startSession(relationId, contactPhone, historyDays, skipWipe);
+      await startSession(relationId, contactPhone, historyDays);
       session = sessions.get(relationId)!;
     } else {
       // Proxy auto-reconnect — just report the failed state with remaining cooldown.
