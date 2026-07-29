@@ -42,8 +42,8 @@ interface Session {
 }
 
 // Minimum ms between registration attempts after a 405.
-// WhatsApp rate-limit resets every ~5 min; we use 6 min to be safe.
-const RETRY_COOLDOWN_MS = 6 * 60 * 1000;
+// 30 s is enough to avoid hammering WhatsApp; the UI will count down and unlock.
+const RETRY_COOLDOWN_MS = 30 * 1000;
 
 const sessions = new Map<number, Session>();
 
