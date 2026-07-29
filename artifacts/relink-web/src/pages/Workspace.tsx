@@ -205,6 +205,11 @@ export default function Workspace() {
     setIsRecording(false);
   }, []);
 
+  // ── Power snapshot (compact bar above messages) ────────────────────────────
+  const [powerSnapshot, setPowerSnapshot] = useState<{
+    scoreMe: number; scoreOther: number;
+  } | null>(null);
+
   // ── SOS mode ───────────────────────────────────────────────────────────────
   const [sosActive, setSosActive] = useState(false);
   const [sosLoading, setSosLoading] = useState(false);
@@ -307,6 +312,22 @@ export default function Workspace() {
       createSession.mutate({ relationId, data: { title: "Nouvelle analyse" } });
     }
   }, [sessions]);
+
+  // ── Power snapshot — fetch latest analysis for the live bar ───────────────
+  useEffect(() => {
+    if (!relationId) return;
+    fetch(`/api/relations/${relationId}/power-analysis`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.analysis) {
+          setPowerSnapshot({
+            scoreMe: d.analysis.powerScoreMe,
+            scoreOther: d.analysis.powerScoreOther,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [relationId]);
 
   // ── Load initial WhatsApp messages ─────────────────────────────────────────
   const loadInitial = useCallback(() => {
@@ -1311,6 +1332,58 @@ export default function Workspace() {
             </button>
           </div>
         )}
+
+        {/* ── Live power balance bar ───────────────────────────────────────── */}
+        {powerSnapshot && (() => {
+          const { scoreMe, scoreOther, meName, otherName } = powerSnapshot;
+          // Convert 0-100 score to a clean balance metric
+          // scoreMe < 50 = other has more power, scoreMe > 50 = me has more power
+          const mePct = scoreMe; // width of left (me) segment
+          // Determine dominant side
+          const diff = Math.abs(scoreMe - scoreOther);
+          const label =
+            diff < 5  ? "Équilibré"
+            : diff < 15 ? (scoreMe < scoreOther ? `Légère domination de ${otherName}` : `Légère domination de ${meName}`)
+            : diff < 30 ? (scoreMe < scoreOther ? `${otherName} domine` : `${meName} domine`)
+            : (scoreMe < scoreOther ? `Fort déséquilibre — ${otherName} en contrôle` : `Fort déséquilibre — ${meName} en contrôle`);
+          const meColor = scoreMe < 40 ? "bg-red-400" : scoreMe < 50 ? "bg-amber-400" : "bg-emerald-400";
+          const otherColor = scoreOther < 40 ? "bg-red-400" : scoreOther < 50 ? "bg-amber-400" : "bg-emerald-500";
+          return (
+            <div className="px-4 py-1.5 border-b bg-background/60 shrink-0">
+              <div className="flex items-center gap-2">
+                {/* Me label */}
+                <div className="flex flex-col items-end shrink-0 w-14">
+                  <span className="text-[10px] font-semibold text-muted-foreground leading-none">{meName}</span>
+                  <span className={cn(
+                    "text-[11px] font-bold tabular-nums leading-none mt-0.5",
+                    scoreMe < 40 ? "text-red-500" : scoreMe < 50 ? "text-amber-500" : "text-emerald-600"
+                  )}>{scoreMe}</span>
+                </div>
+                {/* Bar */}
+                <div className="flex-1 flex h-2.5 rounded-full overflow-hidden gap-px bg-muted">
+                  <div
+                    className={cn("h-full rounded-l-full transition-all duration-700", meColor)}
+                    style={{ width: `${mePct}%` }}
+                  />
+                  <div
+                    className={cn("h-full rounded-r-full transition-all duration-700", otherColor)}
+                    style={{ width: `${100 - mePct}%` }}
+                  />
+                </div>
+                {/* Other label */}
+                <div className="flex flex-col items-start shrink-0 w-14">
+                  <span className="text-[10px] font-semibold text-muted-foreground leading-none truncate max-w-full">{otherName}</span>
+                  <span className={cn(
+                    "text-[11px] font-bold tabular-nums leading-none mt-0.5",
+                    scoreOther < 40 ? "text-red-500" : scoreOther < 50 ? "text-amber-500" : "text-emerald-600"
+                  )}>{scoreOther}</span>
+                </div>
+              </div>
+              {/* Label */}
+              <p className="text-[10px] text-muted-foreground text-center mt-1 leading-none">{label}</p>
+            </div>
+          );
+        })()}
 
         {/* Body — month strip + messages */}
         <div className="flex flex-1 min-h-0">

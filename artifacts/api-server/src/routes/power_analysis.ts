@@ -243,24 +243,36 @@ Produis une analyse complète en suivant EXACTEMENT ce format markdown:
       }
     }
 
-    // Compute power scores from stats
+    // Compute power scores from stats.
+    // Each factor is expressed as a ratio [0..1] where 0.5 = equal.
+    // Positive delta = me has more of this trait = less power (over-investing).
+    // Weights are intentionally large so real imbalances produce visible gaps.
     let meScore = 50;
     const total = stats.meCount + stats.otherCount || 1;
-    // More messages = less power (over-investing)
-    meScore -= Math.round((stats.meCount / total - 0.5) * 20);
-    // Faster response = less power
-    if (stats.meAvgResponseMs > 0 && stats.otherAvgResponseMs > 0) {
-      const respRatio = stats.meAvgResponseMs / (stats.meAvgResponseMs + stats.otherAvgResponseMs);
-      meScore += Math.round((respRatio - 0.5) * 20);
-    }
-    // More initiates = less power
-    const initTotal = stats.meInitiates + stats.otherInitiates || 1;
-    meScore -= Math.round((stats.meInitiates / initTotal - 0.5) * 15);
-    // More double texts = less power
-    const dtTotal = stats.meDoubleTexts + stats.otherDoubleTexts || 1;
-    meScore -= Math.round((stats.meDoubleTexts / dtTotal - 0.5) * 10);
 
-    meScore = Math.max(5, Math.min(95, meScore));
+    // 1. Message volume — more messages = less power (40 pts max swing)
+    meScore -= (stats.meCount / total - 0.5) * 40;
+
+    // 2. Character volume — writing more = more invested (30 pts)
+    const charTotal = stats.meChars + stats.otherChars || 1;
+    meScore -= (stats.meChars / charTotal - 0.5) * 30;
+
+    // 3. Double-texts — strongest desperation signal (35 pts)
+    const dtTotal = stats.meDoubleTexts + stats.otherDoubleTexts || 1;
+    meScore -= (stats.meDoubleTexts / dtTotal - 0.5) * 35;
+
+    // 4. Response speed — faster = more eager = less power (25 pts)
+    if (stats.meAvgResponseMs > 0 && stats.otherAvgResponseMs > 0) {
+      const respTotal = stats.meAvgResponseMs + stats.otherAvgResponseMs;
+      // Lower response time = smaller ratio = less power
+      meScore -= (0.5 - stats.meAvgResponseMs / respTotal) * 25;
+    }
+
+    // 5. Initiations — opening conversations more = less power (20 pts)
+    const initTotal = stats.meInitiates + stats.otherInitiates || 1;
+    meScore -= (stats.meInitiates / initTotal - 0.5) * 20;
+
+    meScore = Math.max(0, Math.min(100, Math.round(meScore)));
     const otherScore = 100 - meScore;
 
     // Save to DB
