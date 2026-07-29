@@ -35,14 +35,19 @@ interface Session {
   contactPhone?: string; // e.g. "33612345678" (no +)
   historyDays?: number; // 0 = no history, 7/60/180/3650 = import window
   intentionalClose?: boolean; // set before socket.end() to prevent the connection.update handler from re-scheduling startSession
-  historyImported?: boolean; // true once messages.history-set finished — prevents SSE reconnects from re-triggering a creds wipe
-  failedAt?: number; // epoch ms when a 405/pre-QR failure occurred — enforces server-side cooldown
+  historyImported?: boolean; // true once messages.history-set finished
+  failedAt?: number;     // epoch ms of last 405 failure
+  failedCount?: number;  // how many consecutive pre-QR failures
+  autoRetryTimer?: ReturnType<typeof setTimeout>; // pending auto-retry timer
   sseClients: Set<{ write: (data: string) => void; end: () => void }>;
 }
 
-// Minimum ms between registration attempts after a 405.
-// 30 s is enough to avoid hammering WhatsApp; the UI will count down and unlock.
-const RETRY_COOLDOWN_MS = 30 * 1000;
+// Max automatic retries before requiring manual user action
+const MAX_AUTO_RETRIES = 5;
+
+// Base delay for auto-retry (ms). Each attempt adds 15s: 30, 45, 60, 75, 90.
+// A random jitter of 0–10s is added to prevent synchronized floods from multiple clients.
+const BASE_RETRY_DELAY_MS = 30_000;
 
 const sessions = new Map<number, Session>();
 
@@ -400,14 +405,33 @@ async function startSession(relationId: number, contactPhone?: string, historyDa
         broadcastToSession(relationId, { type: "disconnected", loggedOut: false });
         setTimeout(() => startSession(relationId), 3000);
       } else {
-        // Dropped before QR scan (e.g. 405 rate-limit) — mark as "failed" so the
-        // SSE endpoint does NOT restart automatically on proxy-timeout reconnect.
-        // The user must explicitly click "Générer le QR code" to retry.
+        // Dropped before QR scan (e.g. 405 rate-limit).
+        // Auto-retry with exponential backoff + random jitter so multiple clients
+        // don't all hit WhatsApp at the same moment.
         session.status = "failed";
         session.failedAt = Date.now();
-        const retryAfter = Math.ceil(RETRY_COOLDOWN_MS / 1000); // seconds
-        console.log(`[Baileys:${relationId}] Connection failed before QR (statusCode=${statusCode}) — cooldown ${retryAfter}s`);
-        broadcastToSession(relationId, { type: "failed", statusCode, retryAfter });
+        const count = (session.failedCount ?? 0) + 1;
+        session.failedCount = count;
+
+        if (count <= MAX_AUTO_RETRIES) {
+          // Delay grows 15 s per attempt; add 0–10 s jitter
+          const delayMs = BASE_RETRY_DELAY_MS + (count - 1) * 15_000 + Math.floor(Math.random() * 10_000);
+          const retryIn = Math.ceil(delayMs / 1000);
+          console.log(`[Baileys:${relationId}] Pre-QR drop (${statusCode}), attempt ${count}/${MAX_AUTO_RETRIES} — auto-retry in ${retryIn}s`);
+          broadcastToSession(relationId, { type: "retrying", attempt: count, maxAttempts: MAX_AUTO_RETRIES, retryIn });
+
+          if (session.autoRetryTimer) clearTimeout(session.autoRetryTimer);
+          session.autoRetryTimer = setTimeout(() => {
+            const cur = sessions.get(relationId);
+            if (!cur || cur.status !== "failed" || cur.intentionalClose) return;
+            console.log(`[Baileys:${relationId}] Auto-retry ${count}/${MAX_AUTO_RETRIES} firing…`);
+            startSession(relationId, cur.contactPhone, cur.historyDays);
+          }, delayMs);
+        } else {
+          // All auto-retries exhausted — require manual action.
+          console.log(`[Baileys:${relationId}] All ${MAX_AUTO_RETRIES} auto-retries exhausted — manual action required`);
+          broadcastToSession(relationId, { type: "failed", statusCode, permanent: true });
+        }
       }
     }
   });
@@ -842,31 +866,27 @@ router.get("/relations/:id/whatsapp/qr", async (req, res) => {
     await startSession(relationId, contactPhone, historyDays);
     session = sessions.get(relationId)!;
   } else if (session.status === "failed") {
-    // Previous attempt failed (e.g. 405 rate-limit before QR was shown).
-    // Only restart if the user explicitly triggered this SSE (has query params),
-    // not when the Replit proxy auto-reconnects after 5 min.
+    // Auto-retry is already scheduled server-side.
+    // If the user explicitly clicks again, cancel the auto-retry and start immediately
+    // (but only if auto-retries are not exhausted — failedCount > MAX_AUTO_RETRIES means permanent).
     const isExplicitRetry = !!(contactPhone || historyDays !== undefined);
-    if (isExplicitRetry) {
-      // Enforce server-side cooldown — don't let the client spam registration attempts.
-      const elapsed = session.failedAt ? Date.now() - session.failedAt : Infinity;
-      if (elapsed < RETRY_COOLDOWN_MS) {
-        const retryAfter = Math.ceil((RETRY_COOLDOWN_MS - elapsed) / 1000);
-        session.sseClients.add(client);
-        res.write(`data: ${JSON.stringify({ type: "failed", retryAfter })}\n\n`);
-        req.on("close", () => { session?.sseClients.delete(client); });
-        console.log(`[Baileys:${relationId}] Retry blocked — cooldown ${retryAfter}s remaining`);
-        return;
-      }
+    const exhausted = (session.failedCount ?? 0) > MAX_AUTO_RETRIES;
+
+    if (isExplicitRetry && exhausted) {
+      // Manual restart after all auto-retries failed — reset counter and go.
+      if (session.autoRetryTimer) { clearTimeout(session.autoRetryTimer); session.autoRetryTimer = undefined; }
+      session.failedCount = 0;
+      await startSession(relationId, contactPhone, historyDays);
+      session = sessions.get(relationId)!;
+    } else if (isExplicitRetry && !exhausted) {
+      // User clicked before auto-retry fired — cancel pending timer, retry now.
+      if (session.autoRetryTimer) { clearTimeout(session.autoRetryTimer); session.autoRetryTimer = undefined; }
       await startSession(relationId, contactPhone, historyDays);
       session = sessions.get(relationId)!;
     } else {
-      // Proxy auto-reconnect — just report the failed state with remaining cooldown.
-      const elapsed = session.failedAt ? Date.now() - session.failedAt : Infinity;
-      const retryAfter = elapsed < RETRY_COOLDOWN_MS
-        ? Math.ceil((RETRY_COOLDOWN_MS - elapsed) / 1000)
-        : 0;
+      // Proxy reconnect or page reload — just subscribe, auto-retry is coming.
       session.sseClients.add(client);
-      res.write(`data: ${JSON.stringify({ type: "failed", retryAfter })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "failed", permanent: exhausted })}\n\n`);
       req.on("close", () => { session?.sseClients.delete(client); });
       return;
     }
